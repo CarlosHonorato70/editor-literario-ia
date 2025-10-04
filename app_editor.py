@@ -1,33 +1,44 @@
 import os
 import streamlit as st
-from openai import OpenAI # NOVA IMPORTAÇÃO
+from openai import OpenAI
 from docx import Document
 from io import BytesIO
 from docx.shared import Inches
 
-# --- 0. Configuração e Inicialização ---
+# --- 0. Configuração e Inicialização (CORREÇÃO PARA CHAVE DE PROJETO SK-PROJ-) ---
 
-# Título do Aplicativo Web
 st.set_page_config(page_title="Editor Literário IA - Pré-Impressão", layout="wide")
 st.title("📚 Editor Literário com GPT AI")
 st.subheader("Pré-Impressão Completa: Conteúdo, Coerência, Diagramação e Capa.")
 
-# Nome da variável de ambiente que o Streamlit irá ler
+# Nomes das variáveis que o Streamlit irá ler do secrets.toml
 API_KEY_NAME = "OPENAI_API_KEY"
-MODEL_NAME = "gpt-4o-mini" # Modelo rápido e de baixo custo da OpenAI
+PROJECT_ID_NAME = "OPENAI_PROJECT_ID"
+MODEL_NAME = "gpt-4o-mini" 
 
-# Configuração da API (Lendo a chave dos secrets do Streamlit/variável de ambiente)
+# Configuração da API 
 try:
-    API_KEY = os.environ.get(API_KEY_NAME)
-    if not API_KEY and hasattr(st, 'secrets') and API_KEY_NAME in st.secrets:
-         API_KEY = st.secrets[API_KEY_NAME]
+    # 1. Busca a Chave da API e o Project ID dos Streamlit Secrets
+    API_KEY = None
+    PROJECT_ID = None
+
+    # Lógica de segurança para ler os secrets no Streamlit Cloud
+    if hasattr(st, 'secrets'):
+         if API_KEY_NAME in st.secrets:
+             API_KEY = st.secrets[API_KEY_NAME]
+         if PROJECT_ID_NAME in st.secrets:
+             PROJECT_ID = st.secrets[PROJECT_ID_NAME]
     
-    if not API_KEY:
-        st.error(f"ERRO: A Chave de API da OpenAI ('{API_KEY_NAME}') não está configurada.")
+    # Verifica se os dois valores essenciais estão presentes
+    if not API_KEY or not PROJECT_ID:
+        st.error(f"ERRO: As chaves da OpenAI ({API_KEY_NAME} e {PROJECT_ID_NAME}) não estão configuradas corretamente no Secrets.")
         st.stop()
         
-    # Inicialização do cliente OpenAI
-    client = OpenAI(api_key=API_KEY)
+    # 2. Inicialização do cliente OpenAI usando Project ID (essencial para chaves sk-proj-)
+    client = OpenAI(
+        api_key=API_KEY,
+        project=PROJECT_ID # Este parâmetro é a solução definitiva para o erro 401/sk-proj-
+    )
 except Exception as e:
     st.error(f"Erro na inicialização da API: {e}")
     st.stop()
@@ -45,11 +56,11 @@ def call_openai_api(system_prompt: str, user_content: str) -> str:
                 {"role": "user", "content": user_content}
             ],
             temperature=0.7,
-            max_tokens=3000 # Limite de tokens para a resposta
+            max_tokens=3000
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        return f"[ERRO DE CONEXÃO DA API] Falha: {e}"
+        return f"[ERRO DE CONEXÃO DA API] Falha ao se comunicar com a OpenAI. Verifique se o Project ID está correto. Detalhes: {e}"
 
 
 # --- 2. Prompts de Edição e Revisão ---
@@ -114,7 +125,6 @@ def gerar_conteudo_capa_contracapa(titulo: str, autor: str, texto_completo: str)
     ---
     """
     
-    # Adiciona a formatação de saída esperada (prompting de cadeia de pensamento)
     prompt_final = f"{system_prompt}\n\n{user_content}\n\nUse o seguinte formato de saída:\n## Título: {titulo}\n## Autor: {autor}\n\n**BLURB DA CONTRACAPA:**\n[Seu texto de blurb aqui...]\n\n**PALAVRAS-CHAVE DE MARKETING:**\n[Palavra 1], [Palavra 2], [Palavra 3]\n\n**SUGESTÃO DE ARTE PARA A CAPA:**\n[Sua descrição de imagem aqui...]"
     
     return call_openai_api(system_prompt, prompt_final)
