@@ -1,152 +1,126 @@
 import os
 import streamlit as st
-from google import genai
+from openai import OpenAI # NOVA IMPORTAÇÃO
 from docx import Document
 from io import BytesIO
 from docx.shared import Inches
 
 # --- 0. Configuração e Inicialização ---
 
+# Título do Aplicativo Web
 st.set_page_config(page_title="Editor Literário IA - Pré-Impressão", layout="wide")
-st.title("📚 Editor Literário com Gemini AI")
+st.title("📚 Editor Literário com GPT AI")
 st.subheader("Pré-Impressão Completa: Conteúdo, Coerência, Diagramação e Capa.")
 
-# Configuração da API (Lendo a chave dos secrets do Streamlit)
+# Nome da variável de ambiente que o Streamlit irá ler
+API_KEY_NAME = "OPENAI_API_KEY"
+MODEL_NAME = "gpt-4o-mini" # Modelo rápido e de baixo custo da OpenAI
+
+# Configuração da API (Lendo a chave dos secrets do Streamlit/variável de ambiente)
 try:
-    API_KEY = os.environ.get("GEMINI_API_KEY")
-    if not API_KEY and hasattr(st, 'secrets') and 'GEMINI_API_KEY' in st.secrets:
-         API_KEY = st.secrets['GEMINI_API_KEY']
+    API_KEY = os.environ.get(API_KEY_NAME)
+    if not API_KEY and hasattr(st, 'secrets') and API_KEY_NAME in st.secrets:
+         API_KEY = st.secrets[API_KEY_NAME]
     
     if not API_KEY:
-        st.error("ERRO: A Chave de API do Gemini não está configurada.")
+        st.error(f"ERRO: A Chave de API da OpenAI ('{API_KEY_NAME}') não está configurada.")
         st.stop()
         
-    client = genai.Client(api_key=API_KEY)
+    # Inicialização do cliente OpenAI
+    client = OpenAI(api_key=API_KEY)
 except Exception as e:
     st.error(f"Erro na inicialização da API: {e}")
     st.stop()
 
 
-# --- 1. Função do Prompt de Edição de Parágrafo ---
+# --- 1. Função de Chamada da API (AGORA UNIFICADA E USANDO CHAT COMPLETIONS) ---
 
-def get_edicao_prompt(texto: str) -> str:
-    """Cria o prompt detalhado para edição gramatical e coerência."""
-    prompt = f"""
+def call_openai_api(system_prompt: str, user_content: str) -> str:
+    """Função genérica para chamar a API da OpenAI."""
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            temperature=0.7,
+            max_tokens=3000 # Limite de tokens para a resposta
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"[ERRO DE CONEXÃO DA API] Falha: {e}"
+
+
+# --- 2. Prompts de Edição e Revisão ---
+
+def get_edicao_prompt_system() -> str:
+    return """
     Você é um editor literário de nível sênior, com foco em ficção.
     Sua tarefa é revisar, editar e aprimorar o parágrafo a seguir, garantindo que esteja pronto para a publicação.
-    
     Instruções de Edição:
     1. **Revisão Gramatical e Ortográfica:** Corrija todos os erros.
     2. **Edição de Estilo (Força Narrativa):** Sugira reescritas para frases fracas, utilizando o princípio "Mostre, Não Diga" e favorecendo a voz ativa.
-    3. **Coerência de Linguagem e Narrativa:** Mantenha um tom consistente. Se identificar nomes, locais ou fatos que claramente contradizem o contexto de um livro, sinalize e corrija.
-    
+    3. **Coerência de Linguagem e Narrativa:** Mantenha um tom consistente. Se identificar nomes, locais ou fatos que contradizem o contexto de um livro, corrija sutilmente.
     ATENÇÃO: Retorne *apenas* o parágrafo revisado, sem comentários, introduções ou explicações.
-    
-    Parágrafo a ser editado:
-    ---
-    {texto}
-    ---
     """
-    return prompt
 
 def revisar_paragrafo(paragrafo_texto: str) -> str:
-    """Envia o parágrafo para a API do Gemini e recebe a versão editada."""
+    """Envia o parágrafo para a API da OpenAI e recebe a versão editada."""
+    if not paragrafo_texto.strip(): return "" 
     
-    if not paragrafo_texto.strip():
-        return "" 
-
-    prompt = get_edicao_prompt(paragrafo_texto)
+    system_prompt = get_edicao_prompt_system()
+    user_content = f"Parágrafo a ser editado:\n---\n{paragrafo_texto}\n---"
     
-    try:
-        # ATENÇÃO: Usando o modelo gratuito 'gemini-2.5-flash'
-        response = client.models.generate_content(
-            model='gemini-2.5-flash', 
-            contents=prompt
-        )
-        return response.text.strip()
+    texto_revisado = call_openai_api(system_prompt, user_content)
     
-    except Exception as e:
-        print(f"[ERRO DE IA] Falha ao processar o parágrafo: {e}")
+    # Se houver erro, retorna o original
+    if "[ERRO DE CONEXÃO DA API]" in texto_revisado:
+        print(f"Erro na revisão. Retornando original. Detalhes: {texto_revisado}")
         return paragrafo_texto
+    
+    return texto_revisado
 
-# --- 2. Função de Geração de Relatório Estrutural (Editor-Chefe) ---
+
+# --- 3. Geração de Relatório Estrutural (Editor-Chefe) ---
 
 def gerar_relatorio_estrutural(texto_completo: str) -> str:
+    """Analisa o texto completo para dar feedback estrutural."""
+    system_prompt = """
+    Você é um Editor-Chefe de uma grande editora. Sua tarefa é analisar o manuscrito e gerar um breve Relatório de Revisão para o autor.
+    Foque em: Ritmo da Narrativa, Desenvolvimento de Personagens e Estrutura Geral (início, clímax e resolução).
+    Formate o relatório usando títulos e bullet points.
     """
-    Analisa o texto completo para dar feedback estrutural, de ritmo e de personagem.
-    """
-    prompt_relatorio = f"""
-    Você é um Editor-Chefe de uma grande editora. Sua tarefa é analisar o manuscrito e gerar um breve Relatório de Revisão para o autor, focando em:
-    
-    1. **Ritmo da Narrativa:** Em quais momentos o ritmo está lento ou muito acelerado.
-    2. **Desenvolvimento de Personagens:** A motivação e arco dos personagens principais são claros e consistentes?
-    3. **Estrutura Geral:** O início, clímax e resolução são satisfatórios?
-    
-    Formate o relatório usando títulos e bullet points, com no máximo 500 palavras.
-    
-    MANUSCRITO:
-    ---
-    {texto_completo[:15000]} 
-    ---
-    """
-    try:
-        # ATENÇÃO: Usando o modelo gratuito 'gemini-2.5-flash'
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt_relatorio
-        )
-        return response.text
-    except Exception as e:
-        return f"Falha ao gerar o Relatório Estrutural: {e}"
+    user_content = f"MANUSCRITO PARA ANÁLISE:\n---\n{texto_completo[:15000]}\n---"
+    return call_openai_api(system_prompt, user_content)
 
-# --- 3. Função de Geração do Conteúdo de Capa e Contracapa (Marketing) ---
+
+# --- 4. Geração do Conteúdo de Capa e Contracapa (Marketing) ---
 
 def gerar_conteudo_capa_contracapa(titulo: str, autor: str, texto_completo: str) -> str:
-    """
-    Analisa o manuscrito e gera o blurb (texto da contracapa) e sugestões de design.
-    """
-    prompt_capa = f"""
+    """Analisa o manuscrito e gera o blurb (texto da contracapa) e sugestões de design."""
+    system_prompt = """
     Você é um especialista em Marketing e um copywriter de best-sellers.
-    Sua tarefa é analisar o manuscrito e gerar o conteúdo da Capa e Contracapa.
-
-    Requisitos:
-    1. **Blurb (Contracapa):** Crie um texto de 3-4 parágrafos curtos, extremamente envolvente, que crie suspense e prepare o leitor, sem dar spoilers do clímax. Comece com uma frase de efeito.
-    2. **Palavras-chave:** Sugira 3 palavras-chave de marketing que definem o tom do livro.
-    3. **Sugestão de Imagem:** Descreva (em 1-2 frases) o tipo de imagem ideal para a capa que combine com o tema e gênero do livro.
-
-    Use este formato estrito:
-    
-    ---
-    ## Título: {titulo}
-    ## Autor: {autor}
-    
-    **BLURB DA CONTRACAPA:**
-    [Seu texto de blurb aqui...]
-    
-    **PALAVRAS-CHAVE DE MARKETING:**
-    [Palavra 1], [Palavra 2], [Palavra 3]
-    
-    **SUGESTÃO DE ARTE PARA A CAPA:**
-    [Sua descrição de imagem aqui...]
-    ---
-    
-    MANUSCRITO PARA ANÁLISE (Apenas para contexto):
+    Analise o manuscrito para gerar o conteúdo da Capa e Contracapa.
+    Requisitos: 1. Blurb (Contracapa): 3-4 parágrafos curtos, envolventes, criando suspense. 2. Palavras-chave: Sugira 3 palavras-chave de marketing. 3. Sugestão de Imagem: Descreva a imagem ideal para a capa.
+    Use o formato estrito de saída.
+    """
+    user_content = f"""
+    Título: {titulo}
+    Autor: {autor}
+    MANUSCRITO PARA ANÁLISE:
     ---
     {texto_completo[:15000]}
     ---
     """
-    try:
-        # ATENÇÃO: Usando o modelo gratuito 'gemini-2.5-flash'
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt_capa
-        )
-        return response.text
-    except Exception as e:
-        return f"Falha ao gerar o conteúdo de Capa/Contracapa: {e}"
+    
+    # Adiciona a formatação de saída esperada (prompting de cadeia de pensamento)
+    prompt_final = f"{system_prompt}\n\n{user_content}\n\nUse o seguinte formato de saída:\n## Título: {titulo}\n## Autor: {autor}\n\n**BLURB DA CONTRACAPA:**\n[Seu texto de blurb aqui...]\n\n**PALAVRAS-CHAVE DE MARKETING:**\n[Palavra 1], [Palavra 2], [Palavra 3]\n\n**SUGESTÃO DE ARTE PARA A CAPA:**\n[Sua descrição de imagem aqui...]"
+    
+    return call_openai_api(system_prompt, prompt_final)
 
 
-# --- 4. Função Principal: Processamento de Revisão e Diagramação DOCX ---
+# --- 5. Função Principal: Processamento de Revisão e Diagramação DOCX ---
 
 def processar_manuscrito(uploaded_file):
     documento_original = Document(uploaded_file)
@@ -189,9 +163,9 @@ def processar_manuscrito(uploaded_file):
     return documento_revisado, texto_completo
 
 
-# --- 5. Interface do Streamlit (UI) ---
+# --- 6. Interface do Streamlit (UI) ---
 
-# Coleta de Metadados (Necessário para a Capa/Lombada)
+# Coleta de Metadados
 st.markdown("---")
 st.subheader("1. Informações do Livro")
 col1, col2, col3 = st.columns(3)
@@ -245,8 +219,7 @@ if uploaded_file is not None and st.button("3. Iniciar PRÉ-IMPRESSÃO COMPLETA"
         # --- PASSO C: Especificações Técnicas Finais (Lombada) ---
         st.subheader("RESULTADO 3: Especificações Técnicas para o Gráfico")
         
-        # Fórmula genérica para espessura da lombada (depende do papel, mas isso é uma boa estimativa)
-        # Assumindo papel offset 90g (0.00115 cm/página)
+        # Fórmula genérica para espessura da lombada
         espessura_cm = round(page_count * 0.00115 * 10, 2) 
 
         st.markdown(f"""
