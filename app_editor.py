@@ -7,11 +7,11 @@ from docx.shared import Inches
 
 # --- 0. Configuração e Inicialização ---
 
-st.set_page_config(page_title="Editor Literário IA", layout="wide")
+st.set_page_config(page_title="Editor Literário IA - Pré-Impressão", layout="wide")
 st.title("📚 Editor Literário com Gemini AI")
-st.subheader("Pré-Impressão Completa: Conteúdo, Coerência e Diagramação.")
+st.subheader("Pré-Impressão Completa: Conteúdo, Coerência, Diagramação e Capa.")
 
-# Configuração da API
+# Configuração da API (Lendo a chave dos secrets do Streamlit)
 try:
     API_KEY = os.environ.get("GEMINI_API_KEY")
     if not API_KEY and hasattr(st, 'secrets') and 'GEMINI_API_KEY' in st.secrets:
@@ -27,11 +27,10 @@ except Exception as e:
     st.stop()
 
 
-# --- 1. Função do Prompt de Edição de Parágrafo (Mantida) ---
+# --- 1. Função do Prompt de Edição de Parágrafo ---
 
 def get_edicao_prompt(texto: str) -> str:
     """Cria o prompt detalhado para edição gramatical e coerência."""
-    # ... (O prompt existente que foca na correção de parágrafos)
     prompt = f"""
     Você é um editor literário de nível sênior, com foco em ficção.
     Sua tarefa é revisar, editar e aprimorar o parágrafo a seguir, garantindo que esteja pronto para a publicação.
@@ -61,7 +60,7 @@ def revisar_paragrafo(paragrafo_texto: str) -> str:
         print(f"[ERRO DE IA] Falha ao processar o parágrafo: {e}")
         return paragrafo_texto
 
-# --- NOVA FUNÇÃO: Geração do Relatório Estrutural (Editor-Chefe) ---
+# --- 2. Função de Geração de Relatório Estrutural (Editor-Chefe) ---
 
 def gerar_relatorio_estrutural(texto_completo: str) -> str:
     """
@@ -70,9 +69,9 @@ def gerar_relatorio_estrutural(texto_completo: str) -> str:
     prompt_relatorio = f"""
     Você é um Editor-Chefe de uma grande editora. Sua tarefa é analisar o manuscrito e gerar um breve Relatório de Revisão para o autor, focando em:
     
-    1. **Ritmo da Narrativa:** Em quais momentos o ritmo está lento (excesso de descrição) ou muito acelerado (falta de desenvolvimento).
+    1. **Ritmo da Narrativa:** Em quais momentos o ritmo está lento ou muito acelerado.
     2. **Desenvolvimento de Personagens:** A motivação e arco dos personagens principais são claros e consistentes?
-    3. **Estrutura Geral:** O início e o final (clímax e resolução) são satisfatórios?
+    3. **Estrutura Geral:** O início, clímax e resolução são satisfatórios?
     
     Formate o relatório usando títulos e bullet points, com no máximo 500 palavras.
     
@@ -81,8 +80,6 @@ def gerar_relatorio_estrutural(texto_completo: str) -> str:
     {texto_completo[:15000]} 
     ---
     """
-    # Limita o texto completo a 15000 caracteres para evitar ultrapassar o limite de tokens, 
-    # pois o Gemini-2.5-pro possui limite de 32768 tokens, e o prompt em si já é grande.
     try:
         response = client.models.generate_content(
             model='gemini-2.5-pro',
@@ -92,8 +89,53 @@ def gerar_relatorio_estrutural(texto_completo: str) -> str:
     except Exception as e:
         return f"Falha ao gerar o Relatório Estrutural: {e}"
 
+# --- NOVA FUNÇÃO: Geração do Conteúdo de Capa e Contracapa (Marketing) ---
 
-# --- FUNÇÃO PRINCIPAL: Revisão, Diagramação e Coleta de Texto Completo ---
+def gerar_conteudo_capa_contracapa(titulo: str, autor: str, texto_completo: str) -> str:
+    """
+    Analisa o manuscrito e gera o blurb (texto da contracapa) e sugestões de design.
+    """
+    prompt_capa = f"""
+    Você é um especialista em Marketing e um copywriter de best-sellers.
+    Sua tarefa é analisar o manuscrito e gerar o conteúdo da Capa e Contracapa.
+
+    Requisitos:
+    1. **Blurb (Contracapa):** Crie um texto de 3-4 parágrafos curtos, extremamente envolvente, que crie suspense e prepare o leitor, sem dar spoilers do clímax. Comece com uma frase de efeito.
+    2. **Palavras-chave:** Sugira 3 palavras-chave de marketing que definem o tom do livro.
+    3. **Sugestão de Imagem:** Descreva (em 1-2 frases) o tipo de imagem ideal para a capa que combine com o tema e gênero do livro.
+
+    Use este formato estrito:
+    
+    ---
+    ## Título: {titulo}
+    ## Autor: {autor}
+    
+    **BLURB DA CONTRACAPA:**
+    [Seu texto de blurb aqui...]
+    
+    **PALAVRAS-CHAVE DE MARKETING:**
+    [Palavra 1], [Palavra 2], [Palavra 3]
+    
+    **SUGESTÃO DE ARTE PARA A CAPA:**
+    [Sua descrição de imagem aqui...]
+    ---
+    
+    MANUSCRITO PARA ANÁLISE (Apenas para contexto):
+    ---
+    {texto_completo[:15000]}
+    ---
+    """
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.5-pro',
+            contents=prompt_capa
+        )
+        return response.text
+    except Exception as e:
+        return f"Falha ao gerar o conteúdo de Capa/Contracapa: {e}"
+
+
+# --- 3. Função Principal: Processamento de Revisão e Diagramação DOCX ---
 
 def processar_manuscrito(uploaded_file):
     documento_original = Document(uploaded_file)
@@ -116,7 +158,7 @@ def processar_manuscrito(uploaded_file):
     
     for i, paragrafo in enumerate(paragrafos):
         texto_original = paragrafo.text
-        texto_completo += texto_original + "\n" # Coleta o texto completo para o relatório
+        texto_completo += texto_original + "\n"
         
         percent_complete = int((i + 1) / total_paragrafos * 100)
         progress_bar.progress(percent_complete, text=f"Processando {percent_complete}% ({i+1}/{total_paragrafos})")
@@ -133,13 +175,29 @@ def processar_manuscrito(uploaded_file):
     progress_bar.progress(100, text="Processamento concluído! 🎉")
     st.success("Manuscrito revisado, com coerência checada e diagramado com sucesso.")
     
-    return documento_revisado, texto_completo # Retorna os dois resultados
+    return documento_revisado, texto_completo
 
 
 # --- 4. Interface do Streamlit (UI) ---
 
+# Coleta de Metadados (Necessário para a Capa/Lombada)
+st.markdown("---")
+st.subheader("1. Informações do Livro")
+col1, col2, col3 = st.columns(3)
+with col1:
+    book_title = st.text_input("Título do Livro", "O Último Código de Honra")
+with col2:
+    book_author = st.text_input("Nome do Autor", "Carlos Honorato")
+with col3:
+    # A contagem de páginas é essencial para a espessura da lombada.
+    page_count = st.number_input("Contagem Aproximada de Páginas", min_value=10, value=250, step=10, help="Use a contagem de páginas do seu DOCX antes da diagramação.")
+
+
+st.markdown("---")
+st.subheader("2. Arquivo do Manuscrito")
+
 uploaded_file = st.file_uploader(
-    "1. Faça o upload do seu arquivo .docx", 
+    "Faça o upload do seu arquivo .docx", 
     type=['docx'],
     help="O processamento de arquivos grandes pode levar alguns minutos."
 )
@@ -149,40 +207,70 @@ st.warning("""
     Para gerar o PDF/X final, utilize a função "Exportar para PDF" em seu editor de texto (Word/LibreOffice).
 """)
 
-if uploaded_file is not None:
-    if st.button("2. Iniciar Revisão, Coerência e Diagramação"):
-        st.info("Atenção: O processo de Pré-Impressão foi iniciado. Isso pode levar alguns minutos...")
+if uploaded_file is not None and st.button("3. Iniciar PRÉ-IMPRESSÃO COMPLETA"):
+    if not book_title or not book_author:
+        st.error("Por favor, preencha o Título e o Autor antes de iniciar.")
+        st.stop()
         
-        # Chama a função principal que agora retorna 2 resultados
-        documento_revisado, texto_completo = processar_manuscrito(uploaded_file)
+    st.info("Atenção: O processo de Pré-Impressão foi iniciado. Isso pode levar alguns minutos...")
+    
+    # Processa o manuscrito (revisão e diagrama)
+    documento_revisado, texto_completo = processar_manuscrito(uploaded_file)
+    
+    if documento_revisado:
+        # --- PASSO A: Geração do Relatório Estrutural ---
+        st.subheader("RESULTADO 1: Relatório Estrutural (Editor-Chefe)")
+        with st.spinner("Analisando ritmo e personagens para o relatório estrutural..."):
+            relatorio = gerar_relatorio_estrutural(texto_completo)
         
-        if documento_revisado:
-            # --- 3. Geração do Relatório Estrutural ---
-            st.subheader("Relatório de Conteúdo (Editor-Chefe)")
-            with st.spinner("Analisando ritmo e personagens para o relatório estrutural..."):
-                relatorio = gerar_relatorio_estrutural(texto_completo)
-            
-            # Mostra o relatório na tela e permite download
-            st.text_area("Relatório Estrutural da IA:", relatorio, height=300)
-            
-            # Prepara o relatório para download como arquivo de texto
-            relatorio_buffer = BytesIO(relatorio.encode('utf-8'))
-            st.download_button(
-                label="3A. ⬇️ Baixar Relatório Estrutural (.txt)",
-                data=relatorio_buffer,
-                file_name="Relatorio_Estrutural.txt",
-                mime="text/plain"
-            )
+        st.text_area("Relatório Estrutural da IA:", relatorio, height=300)
+        
+        # --- PASSO B: Geração do Conteúdo da Capa/Contracapa ---
+        st.subheader("RESULTADO 2: Conteúdo de Capa/Contracapa (Marketing)")
+        with st.spinner("Criando o blurb de marketing e sugestões de design..."):
+            conteudo_capa = gerar_conteudo_capa_contracapa(book_title, book_author, texto_completo)
+        
+        st.text_area("Conteúdo de Vendas e Sugestões de Arte:", conteudo_capa, height=400)
 
-            # Prepara e disponibiliza o DOCX revisado
-            buffer = BytesIO()
-            documento_revisado.save(buffer)
-            buffer.seek(0)
-            
-            st.download_button(
-                label="3B. ⬇️ Baixar Manuscrito Diagramado (.docx)",
-                data=buffer,
-                file_name=f"{uploaded_file.name.replace('.docx', '')}_FINAL_DIAGRAMADO.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-            st.balloons()
+        # --- PASSO C: Especificações Técnicas Finais (Lombada) ---
+        st.subheader("RESULTADO 3: Especificações Técnicas para o Gráfico")
+        
+        # Fórmula genérica para espessura da lombada (depende do papel, mas isso é uma boa estimativa)
+        # Assumindo papel offset 90g (0.00115 cm/página)
+        # Espessura total em cm
+        espessura_cm = round(page_count * 0.00115 * 10, 2) 
+
+        st.markdown(f"""
+        O seu produto de pré-impressão está pronto. Entregue os arquivos abaixo ao seu designer gráfico ou gráfica:
+
+        #### 📄 Especificações do Livro Finalizado
+        - **Formato do Miolo:** A5 (14.8cm x 21cm)
+        - **Número de Páginas (Estimado):** {page_count}
+        - **Espessura da Lombada (Estimada):** **{espessura_cm} cm**
+        - **Requisito de Entrega da Gráfica:** PDF/X-1a ou PDF/X-3 (Gerado manualmente a partir do DOCX baixado)
+        """)
+
+
+        # --- PASSO D: Download dos Arquivos ---
+        st.markdown("#### ⬇️ Downloads Finais")
+        
+        # Download do Relatório
+        relatorio_buffer = BytesIO(relatorio.encode('utf-8'))
+        st.download_button(
+            label="1. Baixar Relatório Estrutural (.txt)",
+            data=relatorio_buffer,
+            file_name="Relatorio_Estrutural.txt",
+            mime="text/plain"
+        )
+        
+        # Download do DOCX Diagramado
+        buffer = BytesIO()
+        documento_revisado.save(buffer)
+        buffer.seek(0)
+        st.download_button(
+            label="2. Baixar Manuscrito Diagramado (.docx)",
+            data=buffer,
+            file_name=f"{book_title.replace(' ', '_')}_FINAL_DIAGRAMADO.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        st.balloons()
