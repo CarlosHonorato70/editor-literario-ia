@@ -50,12 +50,21 @@ def get_edicao_prompt(texto: str) -> str:
     return prompt
 
 def revisar_paragrafo(paragrafo_texto: str) -> str:
-    # Função que envia o parágrafo para a IA
-    if not paragrafo_texto.strip(): return "" 
+    """Envia o parágrafo para a API do Gemini e recebe a versão editada."""
+    
+    if not paragrafo_texto.strip():
+        return "" 
+
     prompt = get_edicao_prompt(paragrafo_texto)
+    
     try:
-        response = client.models.generate_content(model='gemini-2.5-pro', contents=prompt)
+        # ATENÇÃO: Usando o modelo gratuito 'gemini-2.5-flash'
+        response = client.models.generate_content(
+            model='gemini-2.5-flash', 
+            contents=prompt
+        )
         return response.text.strip()
+    
     except Exception as e:
         print(f"[ERRO DE IA] Falha ao processar o parágrafo: {e}")
         return paragrafo_texto
@@ -81,15 +90,16 @@ def gerar_relatorio_estrutural(texto_completo: str) -> str:
     ---
     """
     try:
+        # ATENÇÃO: Usando o modelo gratuito 'gemini-2.5-flash'
         response = client.models.generate_content(
-            model='gemini-2.5-pro',
+            model='gemini-2.5-flash',
             contents=prompt_relatorio
         )
         return response.text
     except Exception as e:
         return f"Falha ao gerar o Relatório Estrutural: {e}"
 
-# --- NOVA FUNÇÃO: Geração do Conteúdo de Capa e Contracapa (Marketing) ---
+# --- 3. Função de Geração do Conteúdo de Capa e Contracapa (Marketing) ---
 
 def gerar_conteudo_capa_contracapa(titulo: str, autor: str, texto_completo: str) -> str:
     """
@@ -126,8 +136,9 @@ def gerar_conteudo_capa_contracapa(titulo: str, autor: str, texto_completo: str)
     ---
     """
     try:
+        # ATENÇÃO: Usando o modelo gratuito 'gemini-2.5-flash'
         response = client.models.generate_content(
-            model='gemini-2.5-pro',
+            model='gemini-2.5-flash',
             contents=prompt_capa
         )
         return response.text
@@ -135,7 +146,7 @@ def gerar_conteudo_capa_contracapa(titulo: str, autor: str, texto_completo: str)
         return f"Falha ao gerar o conteúdo de Capa/Contracapa: {e}"
 
 
-# --- 3. Função Principal: Processamento de Revisão e Diagramação DOCX ---
+# --- 4. Função Principal: Processamento de Revisão e Diagramação DOCX ---
 
 def processar_manuscrito(uploaded_file):
     documento_original = Document(uploaded_file)
@@ -178,7 +189,7 @@ def processar_manuscrito(uploaded_file):
     return documento_revisado, texto_completo
 
 
-# --- 4. Interface do Streamlit (UI) ---
+# --- 5. Interface do Streamlit (UI) ---
 
 # Coleta de Metadados (Necessário para a Capa/Lombada)
 st.markdown("---")
@@ -189,7 +200,6 @@ with col1:
 with col2:
     book_author = st.text_input("Nome do Autor", "Carlos Honorato")
 with col3:
-    # A contagem de páginas é essencial para a espessura da lombada.
     page_count = st.number_input("Contagem Aproximada de Páginas", min_value=10, value=250, step=10, help="Use a contagem de páginas do seu DOCX antes da diagramação.")
 
 
@@ -237,7 +247,6 @@ if uploaded_file is not None and st.button("3. Iniciar PRÉ-IMPRESSÃO COMPLETA"
         
         # Fórmula genérica para espessura da lombada (depende do papel, mas isso é uma boa estimativa)
         # Assumindo papel offset 90g (0.00115 cm/página)
-        # Espessura total em cm
         espessura_cm = round(page_count * 0.00115 * 10, 2) 
 
         st.markdown(f"""
