@@ -31,7 +31,9 @@ try:
     
     # Verifica se os dois valores essenciais estão presentes
     if not API_KEY or not PROJECT_ID:
-        st.error(f"ERRO: As chaves da OpenAI ({API_KEY_NAME} e {PROJECT_ID_NAME}) não estão configuradas corretamente no Secrets.")
+        # Se falhar, exibe uma mensagem específica para o autor saber o que falta no secrets.toml
+        st.error(f"ERRO: A Chave da API e o ID do Projeto da OpenAI ({API_KEY_NAME} e {PROJECT_ID_NAME}) não estão configurados corretamente no Secrets.")
+        st.info("Atenção: Para chaves 'sk-proj-', você precisa salvar o 'OPENAI_API_KEY' E o 'OPENAI_PROJECT_ID' no Streamlit Secrets.")
         st.stop()
         
     # 2. Inicialização do cliente OpenAI usando Project ID (essencial para chaves sk-proj-)
@@ -44,7 +46,7 @@ except Exception as e:
     st.stop()
 
 
-# --- 1. Função de Chamada da API (AGORA UNIFICADA E USANDO CHAT COMPLETIONS) ---
+# --- 1. Função de Chamada da API (UNIFICADA) ---
 
 def call_openai_api(system_prompt: str, user_content: str) -> str:
     """Função genérica para chamar a API da OpenAI."""
@@ -72,7 +74,7 @@ def get_edicao_prompt_system() -> str:
     Instruções de Edição:
     1. **Revisão Gramatical e Ortográfica:** Corrija todos os erros.
     2. **Edição de Estilo (Força Narrativa):** Sugira reescritas para frases fracas, utilizando o princípio "Mostre, Não Diga" e favorecendo a voz ativa.
-    3. **Coerência de Linguagem e Narrativa:** Mantenha um tom consistente. Se identificar nomes, locais ou fatos que contradizem o contexto de um livro, corrija sutilmente.
+    3. **Coerência de Linguagem e Narrativa:** Mantenha um tom consistente.
     ATENÇÃO: Retorne *apenas* o parágrafo revisado, sem comentários, introduções ou explicações.
     """
 
@@ -85,9 +87,7 @@ def revisar_paragrafo(paragrafo_texto: str) -> str:
     
     texto_revisado = call_openai_api(system_prompt, user_content)
     
-    # Se houver erro, retorna o original
     if "[ERRO DE CONEXÃO DA API]" in texto_revisado:
-        print(f"Erro na revisão. Retornando original. Detalhes: {texto_revisado}")
         return paragrafo_texto
     
     return texto_revisado
@@ -130,7 +130,54 @@ def gerar_conteudo_capa_contracapa(titulo: str, autor: str, texto_completo: str)
     return call_openai_api(system_prompt, prompt_final)
 
 
-# --- 5. Função Principal: Processamento de Revisão e Diagramação DOCX ---
+# --- 5. NOVA FUNÇÃO: Geração do Relatório de Conformidade KDP (Amazon) ---
+
+def gerar_relatorio_conformidade_kdp(titulo: str, autor: str, page_count: int, espessura_cm: float) -> str:
+    """
+    Gera um checklist de conformidade técnica para upload na Amazon KDP (Kindle Direct Publishing).
+    """
+    
+    # Define o tamanho de corte físico (A5)
+    tamanho_corte = "14.8cm x 21cm (A5)"
+    
+    prompt_kdp = f"""
+    Você é um Especialista Técnico em Publicação e Conformidade da Amazon KDP (Kindle Direct Publishing).
+    Sua tarefa é gerar um Relatório de Conformidade para o manuscrito a seguir, focado em garantir um upload bem-sucedido para Livros Físicos (Brochura) e eBooks (EPUB).
+
+    Use os dados fornecidos:
+    - Título do Livro: {titulo}
+    - Autor: {autor}
+    - Páginas (Estimado): {page_count}
+    - Espessura da Lombada (Calculada): {espessura_cm} cm
+    - Tamanho de Corte: {tamanho_corte}
+
+    Gere o relatório usando este formato:
+    
+    ---
+    ### 1. Livro Físico (Brochura - Miolo e Capa)
+    - **Requisito de Upload (Miolo):** O arquivo final deve ser um PDF sem marcas de corte e no tamanho de corte exato ({tamanho_corte}). O arquivo DOCX diagramado já tem as margens de livro (A5) aplicadas.
+    - **Requisito de Upload (Capa):** O PDF de capa completa (Capa, Lombada, Contracapa) deve ser gerado com as dimensões totais de: (14.8cm x 2) + {espessura_cm} cm de largura e 21cm de altura.
+
+    ### 2. eBook (EPUB/Kindle)
+    Gere um checklist de 5 itens essenciais que o autor deve verificar na formatação do DOCX para garantir um EPUB de qualidade. Foque em:
+    - Uso correto de Estilos (Heading 1 para Títulos de Capítulos).
+    - Remoção de espaços duplos e tabulações no início de parágrafos.
+    - Sumário lógico (Table of Contents - TOC) criado automaticamente pela IA do Kindle.
+    
+    ### 3. Otimização de Metadados (SEO Básico KDP)
+    Com base no Título e Autor, sugira 3 (três) categorias de nicho da Amazon (Ex: Ficção Científica > Steampunk) e 3 (três) palavras-chave de cauda longa (long-tail keywords) que o autor deve usar no backend do KDP para atrair leitores.
+    ---
+    
+    Retorne apenas o texto formatado do relatório.
+    """
+    try:
+        response = call_openai_api("Você é um especialista em publicação KDP.", prompt_kdp)
+        return response
+    except Exception as e:
+        return f"Falha ao gerar o Relatório de Conformidade KDP: {e}"
+
+
+# --- 6. Função Principal: Processamento de Revisão e Diagramação DOCX ---
 
 def processar_manuscrito(uploaded_file):
     documento_original = Document(uploaded_file)
@@ -173,7 +220,7 @@ def processar_manuscrito(uploaded_file):
     return documento_revisado, texto_completo
 
 
-# --- 6. Interface do Streamlit (UI) ---
+# --- 7. Interface do Streamlit (UI) ---
 
 # Coleta de Metadados
 st.markdown("---")
@@ -226,16 +273,26 @@ if uploaded_file is not None and st.button("3. Iniciar PRÉ-IMPRESSÃO COMPLETA"
         
         st.text_area("Conteúdo de Vendas e Sugestões de Arte:", conteudo_capa, height=400)
 
-        # --- PASSO C: Especificações Técnicas Finais (Lombada) ---
-        st.subheader("RESULTADO 3: Especificações Técnicas para o Gráfico")
         
-        # Fórmula genérica para espessura da lombada
+        # --- PASSO C: Cálculos Técnicos ---
+        # Fórmula genérica para espessura da lombada 
         espessura_cm = round(page_count * 0.00115 * 10, 2) 
+        
+        # --- PASSO D: Geração do Relatório de Conformidade KDP (NOVO) ---
+        st.subheader("RESULTADO 3: Relatório de Conformidade KDP (Amazon)")
+        with st.spinner("Gerando checklist técnico e de SEO para o upload na Amazon..."):
+            relatorio_kdp = gerar_relatorio_conformidade_kdp(book_title, book_author, page_count, espessura_cm)
+        
+        st.markdown(relatorio_kdp)
 
+        
+        # --- PASSO E: Resumo Técnico Final ---
+        st.subheader("RESULTADO 4: Resumo Técnico e Downloads")
+        
         st.markdown(f"""
         O seu produto de pré-impressão está pronto. Entregue os arquivos abaixo ao seu designer gráfico ou gráfica:
 
-        #### 📄 Especificações do Livro Finalizado
+        #### 📄 Especificações do Livro Físico (Amazon KDP)
         - **Formato do Miolo:** A5 (14.8cm x 21cm)
         - **Número de Páginas (Estimado):** {page_count}
         - **Espessura da Lombada (Estimada):** **{espessura_cm} cm**
@@ -243,7 +300,7 @@ if uploaded_file is not None and st.button("3. Iniciar PRÉ-IMPRESSÃO COMPLETA"
         """)
 
 
-        # --- PASSO D: Download dos Arquivos ---
+        # --- PASSO F: Download dos Arquivos ---
         st.markdown("#### ⬇️ Downloads Finais")
         
         # Download do Relatório
