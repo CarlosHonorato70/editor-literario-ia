@@ -10,7 +10,7 @@ from docx.enum.style import WD_STYLE_TYPE
 import time 
 from typing import Optional, Dict, Tuple, Any, List
 import math 
-import json # Importação para lidar com o arquivo JSON do checkpoint
+import json 
 
 # --- CONFIGURAÇÃO DE CONSTANTES ---
 
@@ -296,6 +296,7 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
     
     # --- 2. Geração dos Elementos Pré-textuais (Fase 1) ---
     uploaded_file.seek(0)
+    # Lendo o arquivo como bytes e decodificando para obter uma amostra
     manuscript_sample = uploaded_file.getvalue().decode('utf-8', errors='ignore')[:5000]
 
     with status_container:
@@ -336,22 +337,21 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
     # Filtra apenas parágrafos com conteúdo significativo para revisão IA
     paragrafos_para_revisar = [p for p in paragrafos if len(p.text.strip()) >= 10]
     
-    total_paragrafos = len(paragrafos)
+    total_paragrafos = len(paragrafos) # Total de todos os parágrafos (incluindo vazios/curtos)
+    total_a_revisar = len(paragrafos_para_revisar) # Total de parágrafos que a IA realmente processa
+    
     texto_completo = ""
     revisados_count = 0
     
     # Obtém a referência para o estado de checkpoint
     processed_state_map = st.session_state['processed_state'] 
     
-    # Cálculo para determinar quantos já foram revisados
-    already_processed_count = 0
-    for p in paragrafos_para_revisar:
-        if p.text.strip() in processed_state_map:
-            already_processed_count += 1
+    # Cálculo para determinar quantos já foram revisados (do total_a_revisar)
+    already_processed_count = len(processed_state_map)
             
     
     # LÓGICA DE TEMPORIZADOR PARA ESTIMATIVA INICIAL E CONTAGEM REGRESSIVA
-    total_a_revisar = len(paragrafos_para_revisar)
+    
     # Apenas o que falta revisar
     remaining_to_review = total_a_revisar - already_processed_count
     
@@ -371,33 +371,56 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
             
         progress_text_template = "⏳ **Tempo Restante:** {remaining_time} | Progresso: {percent}% ({done}/{total})"
         
-        progress_bar = st.progress(already_processed_count / total_a_revisar if total_a_revisar > 0 else 0, text=progress_text_template.format(
-            percent=int(already_processed_count / total_a_revisar * 100) if total_a_revisar > 0 else 0, 
+        initial_percent = int(already_processed_count / total_a_revisar * 100) if total_a_revisar > 0 else 0
+        
+        progress_bar = st.progress(initial_percent / 100.0, text=progress_text_template.format(
+            percent=initial_percent, 
             done=already_processed_count, 
             total=total_a_revisar, 
             remaining_time=f"{estimated_minutes}m {estimated_seconds}s"
         ))
         start_loop_time = time.time()
+        
+    # NOVO: Local para exibir o botão de auto-checkpoint
+    auto_checkpoint_placeholder = st.empty()
+    
+    # --- NOVO: LÓGICA DE MARCOS (MILESTONES) PARA CHECKPOINT AUTOMÁTICO ---
+    milestones_percentage = [20, 40, 60, 80]
+    milestones_count = {
+        p: math.ceil(total_a_revisar * (p / 100.0)) 
+        for p in milestones_percentage
+    }
+    # Mantém o controle de quais marcos já foram atingidos (para não acionar o mesmo duas vezes)
+    milestones_achieved = []
+    
+    # Pre-popula milestones_achieved se o checkpoint já cobre algum marco
+    for percentage in milestones_percentage:
+        if already_processed_count >= milestones_count[percentage]:
+            milestones_achieved.append(percentage)
     
     # Atualiza a cada 50 novos parágrafos revisados ou 1 (o que for maior)
     update_interval = max(1, remaining_to_review // 50) 
     newly_reviewed_count = 0
     current_revisados_total = already_processed_count
+    
+    # Índice para rastrear parágrafos que são revisáveis no loop principal
+    revisable_index = 0
 
     for i, paragrafo in enumerate(paragrafos):
         texto_original = paragrafo.text
         texto_completo += texto_original + "\n"
         
-        is_revisable = len(texto_original.strip()) >= 10
         texto_original_stripped = texto_original.strip()
-
+        is_revisable = len(texto_original_stripped) >= 10
+        
         if is_revisable:
+            # O parágrafo é elegível para revisão
+            revisable_index += 1
+            
             # --- LÓGICA DE CHECKPOINTING ---
             if texto_original_stripped in processed_state_map:
                 # O parágrafo foi encontrado no checkpoint: PULA A API
                 texto_revisado = processed_state_map[texto_original_stripped]
-                current_revisados_total = current_revisados_total # Já contado no início
-
             elif is_api_ready:
                 # O parágrafo NÃO está no checkpoint e a API está pronta: CHAMA A API
                 texto_revisado = revisar_paragrafo(texto_original, time_rate_s)
@@ -411,6 +434,7 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
                 texto_revisado = texto_original
                 
         else:
+            # Parágrafo não revisável (muito curto ou vazio)
             texto_revisado = texto_original
         
         # Cria o novo parágrafo no documento 
@@ -434,34 +458,67 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
         else:
             novo_paragrafo.style = 'Normal'
 
-        # --- LÓGICA DE ATUALIZAÇÃO DO PROGRESSO ---
-        # Atualiza a barra de progresso em intervalos gerenciáveis
-        if is_revisable and is_api_ready and newly_reviewed_count > 0 and newly_reviewed_count % update_interval == 0:
+        # --- LÓGICA DE ATUALIZAÇÃO DO PROGRESSO E CHECKPOINT AUTOMÁTICO ---
+        if is_revisable and is_api_ready and current_revisados_total > 0:
             
-            percent_complete = int(current_revisados_total / total_a_revisar * 100)
-            elapsed_time = time.time() - start_loop_time
-            
-            if elapsed_time > 0 and newly_reviewed_count > 0:
-                # Calcula a taxa baseada apenas no tempo gasto e nos novos parágrafos
-                avg_time_per_newly_reviewed = elapsed_time / newly_reviewed_count
-                # O tempo restante é calculado com base nos *restantes* a serem revisados pela IA
-                remaining_time_s = (total_a_revisar - current_revisados_total) * avg_time_per_newly_reviewed
+            # Checa se o Marco Automático foi atingido
+            for percentage in milestones_percentage:
+                target_count = milestones_count[percentage]
                 
-                remaining_minutes = int(remaining_time_s // 60)
-                remaining_seconds = int(remaining_time_s % 60)
-                remaining_time_str = f"{remaining_minutes}m {remaining_seconds}s"
-            else:
-                remaining_time_str = "Calculando..."
+                # Checa se cruzou o marco E se ainda não foi salvo NESTA SESSÃO DE LOOP
+                # Usa current_revisados_total, que é o total de parágrafos revisados (incluindo o checkpoint)
+                if current_revisados_total >= target_count and percentage not in milestones_achieved:
+                    
+                    # 1. Marca o marco como atingido
+                    milestones_achieved.append(percentage)
+                    
+                    # 2. Gera o JSON e salva na sessão (para download)
+                    checkpoint_data = json.dumps(st.session_state['processed_state'], indent=4, ensure_ascii=False)
+                    checkpoint_bytes = checkpoint_data.encode('utf-8')
+                    
+                    # 3. Exibe o botão de download no placeholder dinâmico
+                    with auto_checkpoint_placeholder.container():
+                        st.balloons()
+                        st.subheader(f"⭐ Checkpoint Automático Atingido ({percentage}%)! ⭐")
+                        st.download_button(
+                            label=f"💾 BAIXAR AGORA - Progresso {percentage}%",
+                            data=checkpoint_bytes,
+                            file_name=f"{st.session_state['book_title']}_AUTO_CHECKPOINT_{percentage}p.json",
+                            mime="application/json",
+                            key=f'auto_dl_button_{percentage}_{current_revisados_total}' # Key única
+                        )
+                        st.info("Clique no botão acima para salvar seu progresso. A revisão continua...")
 
-            progress_bar.progress(
-                percent_complete, 
-                text=progress_text_template.format(
-                    percent=percent_complete, 
-                    done=current_revisados_total, 
-                    total=total_a_revisar, 
-                    remaining_time=remaining_time_str
+                    # Atingiu um marco, podemos sair do loop de milestones
+                    break 
+        
+            # Atualiza a barra de progresso em intervalos gerenciáveis (se algo novo foi revisado)
+            if newly_reviewed_count > 0 and (newly_reviewed_count % update_interval == 0 or current_revisados_total == total_a_revisar):
+                
+                percent_complete = int(current_revisados_total / total_a_revisar * 100)
+                elapsed_time = time.time() - start_loop_time
+                
+                if elapsed_time > 0 and newly_reviewed_count > 0:
+                    # Calcula o tempo médio por novo parágrafo revisado
+                    avg_time_per_newly_reviewed = elapsed_time / newly_reviewed_count
+                    # Estima o tempo restante
+                    remaining_time_s = (total_a_revisar - current_revisados_total) * avg_time_per_newly_reviewed
+                    
+                    remaining_minutes = int(remaining_time_s // 60)
+                    remaining_seconds = int(remaining_time_s % 60)
+                    remaining_time_str = f"{remaining_minutes}m {remaining_seconds}s"
+                else:
+                    remaining_time_str = "Calculando..."
+
+                progress_bar.progress(
+                    percent_complete / 100.0, 
+                    text=progress_text_template.format(
+                        percent=percent_complete, 
+                        done=current_revisados_total, 
+                        total=total_a_revisar, 
+                        remaining_time=remaining_time_str
+                    )
                 )
-            )
 
     # Após o loop
     end_loop_time = time.time()
@@ -470,6 +527,9 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
     with status_container:
         progress_bar.empty()
         st.success(f"Fase 2/3 concluída: Miolo processado em **{total_loop_duration}s**! 🎉 Total de parágrafos revisados pela IA nesta rodada: **{newly_reviewed_count}**.")
+
+    # Limpa o placeholder no final
+    auto_checkpoint_placeholder.empty()
 
     
     # --- 4. Inserção da Página Pós-Textual ---
@@ -529,7 +589,6 @@ if 'book_title' not in st.session_state:
     if 'time_rate_s' not in st.session_state:
         st.session_state['time_rate_s'] = 0.2
     # NOVO: Estado de Checkpoint - Mapeia texto original -> texto revisado
-    # Este dicionário guarda o progresso revisado.
     st.session_state['processed_state'] = {} 
 
 # --- CÁLCULOS DINÂMICOS ---
@@ -834,16 +893,16 @@ with export_tab:
             with col_dl2:
                  st.warning("Capa indisponível.")
                  
-        # --- LÓGICA DE DOWNLOAD DO CHECKPOINT ---
+        # --- LÓGICA DE DOWNLOAD MANUAL DO CHECKPOINT (Sempre disponível) ---
         
         processed_json = json.dumps(st.session_state['processed_state'], indent=4, ensure_ascii=False)
         processed_bytes = processed_json.encode('utf-8')
         
         with col_dl3:
             st.download_button(
-                label="💾 Baixar Checkpoint (JSON)",
+                label="💾 Baixar Checkpoint (JSON) Manual",
                 data=processed_bytes,
-                file_name=f"{st.session_state['book_title']}_CHECKPOINT.json",
+                file_name=f"{st.session_state['book_title']}_CHECKPOINT_MANUAL.json",
                 mime="application/json",
                 help=f"Baixe este arquivo para salvar o progresso de {len(st.session_state['processed_state'])} parágrafos revisados."
             )
