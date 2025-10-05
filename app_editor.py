@@ -5,6 +5,7 @@ from docx import Document
 from io import BytesIO
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+import requests # Para baixar a imagem da URL
 
 # --- CONFIGURAÇÃO 1: DICIONÁRIO DE TAMANHOS KDP (Miolo) ---
 KDP_SIZES = {
@@ -25,7 +26,7 @@ STYLE_TEMPLATES = {
 
 st.set_page_config(page_title="Editor Literário IA - Pré-Impressão", layout="wide")
 st.title("📚 Editor Literário com GPT AI")
-st.subheader("Pré-Impressão Completa: Editoração Avançada, KDP e Estilo.")
+st.subheader("Pré-Impressão Completa: Editoração Avançada, KDP e Geração de Capa.")
 
 API_KEY_NAME = "OPENAI_API_KEY"
 PROJECT_ID_NAME = "OPENAI_PROJECT_ID"
@@ -91,7 +92,7 @@ def gerar_relatorio_estrutural(texto_completo: str) -> str:
     return call_openai_api(system_prompt, user_content)
 
 
-# --- 4. NOVO: Geração de Elementos Pré-Textuais (Copyright, Sobre o Autor) ---
+# --- 4. Geração de Elementos Pré-Textuais (Copyright, Sobre o Autor) ---
 def gerar_elementos_pre_textuais(titulo: str, autor: str, ano: int, texto_completo: str) -> str:
     """Gera o texto de Copyright e a bio para a página Sobre o Autor."""
     system_prompt = """
@@ -119,7 +120,7 @@ def gerar_elementos_pre_textuais(titulo: str, autor: str, ano: int, texto_comple
     return call_openai_api(system_prompt, user_content)
 
 
-# --- 5. NOVO: Relatório de Estilo Avançado (Contra Clichês e Vícios) ---
+# --- 5. Relatório de Estilo Avançado (Contra Clichês e Vícios) ---
 def gerar_relatorio_estilo_avancado(texto_completo: str) -> str:
     """Análise de Estilo focada em clichês, redundâncias e voz passiva."""
     system_prompt = """
@@ -158,37 +159,74 @@ def gerar_relatorio_conformidade_kdp(titulo: str, autor: str, page_count: int, f
     return call_openai_api("Você é um especialista em publicação KDP.", prompt_kdp)
 
 
-# --- 7. Funções de Diagramação: Inserção de Páginas Pré-textuais ---
+# --- 7. NOVO: Função de Geração de Imagem para Capa ---
+def gerar_capa_ia(prompt_capa: str) -> str:
+    """
+    Chama a API DALL-E 3 para gerar uma imagem para a capa do livro.
+    """
+    if not prompt_capa.strip():
+        return "Por favor, insira um prompt para gerar a capa."
+
+    try:
+        response = client.images.generate(
+            model="dall-e-3",
+            prompt=prompt_capa,
+            size="1024x1024",  # Tamanho comum para capas digitais
+            quality="standard", # Pode ser "hd" para melhor qualidade, mas mais caro
+            n=1 # Apenas uma imagem
+        )
+        image_url = response.data[0].url
+        return image_url
+    except Exception as e:
+        return f"[ERRO GERAÇÃO DE CAPA] Falha ao gerar a imagem: {e}. Verifique se sua conta OpenAI tem créditos para DALL-E 3."
+
+
+# --- 8. Funções de Diagramação: Inserção de Páginas Pré-textuais e Sumário ---
 
 def adicionar_pagina_rosto(documento: Document, titulo: str, autor: str, style_data: dict):
     """Adiciona uma página de rosto formatada."""
     font_name = style_data['font_name']
     
-    # Adicionar quebra de página (Page Break) antes de começar
     documento.add_page_break()
 
-    # Título (Centralizado, Negrito, Maior)
     p_title = documento.add_paragraph()
     p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_title.add_run(titulo).bold = True
-    p_title.runs[0].font.size = Pt(20)
+    p_title.runs[0].font.size = Pt(24) # Título maior
     p_title.runs[0].font.name = font_name
     
-    # Espaço
     for _ in range(5):
         documento.add_paragraph()
     
-    # Autor (Centralizado, menor)
     p_author = documento.add_paragraph()
     p_author.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_author.add_run(autor)
-    p_author.runs[0].font.size = Pt(14)
+    p_author.runs[0].font.size = Pt(16)
     p_author.runs[0].font.name = font_name
 
-    documento.add_page_break() # Próxima página é a de Copyright
+    documento.add_page_break()
 
 
-# --- 8. Função Principal: Processamento de Revisão e Diagramação DOCX ---
+def adicionar_sumario_placeholder(documento: Document):
+    """Adiciona a página de Sumário e instruções para o campo de TOC."""
+    documento.add_page_break()
+    
+    p_header = documento.add_paragraph()
+    p_header.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_header.add_run("Sumário").bold = True
+    p_header.runs[0].font.size = Pt(18)
+    
+    documento.add_paragraph("").add_run().add_break() # Espaço
+    documento.add_paragraph("").add_run().add_break() # Espaço
+
+    p_inst = documento.add_paragraph("Para gerar o índice automático, vá em 'Referências' -> 'Sumário' e clique em 'Inserir Sumário'.")
+    p_inst.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_inst.runs[0].font.size = Pt(10)
+
+    documento.add_page_break()
+
+
+# --- 9. Função Principal: Processamento de Revisão e Diagramação DOCX ---
 
 def processar_manuscrito(uploaded_file, format_data, style_data, pre_text_content):
     documento_original = Document(uploaded_file)
@@ -198,7 +236,6 @@ def processar_manuscrito(uploaded_file, format_data, style_data, pre_text_conten
     width_in = format_data['width_in']
     height_in = format_data['height_in']
     
-    # Tamanho e Margens
     section = documento_revisado.sections[0]
     section.page_width = Inches(width_in)
     section.page_height = Inches(height_in)
@@ -227,12 +264,16 @@ def processar_manuscrito(uploaded_file, format_data, style_data, pre_text_conten
     adicionar_pagina_rosto(documento_revisado, st.session_state['book_title'], st.session_state['book_author'], style_data)
     
     # Página de Copyright (Conteúdo gerado pela IA)
-    copyright_text = pre_text_content.split('### 2. Página')[0]
-    p_copy = documento_revisado.add_paragraph()
+    copyright_text_full = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[0].strip()
+    p_copy_header = documento_revisado.add_paragraph()
+    p_copy_header.add_run("### 1. Página de Copyright e Créditos").bold = True # Adiciona o cabeçalho original
+    p_copy = documento_revisado.add_paragraph(copyright_text_full.replace("### 1. Página de Copyright e Créditos", "").strip()) # Remove o cabeçalho duplicado
     p_copy.style = 'Normal'
-    p_copy.runs[0].font.size = Pt(8)
-    p_copy.add_run(copyright_text)
+    p_copy.runs[0].font.size = Pt(8) # Fonte menor para copyright
     documento_revisado.add_page_break()
+
+    # Sumário (Placeholder e Instruções)
+    adicionar_sumario_placeholder(documento_revisado)
 
     
     # --- PROCESSAMENTO DO MIOLO (Revisão Parágrafo a Parágrafo) ---
@@ -257,31 +298,52 @@ def processar_manuscrito(uploaded_file, format_data, style_data, pre_text_conten
         texto_revisado = revisar_paragrafo(texto_original)
         
         novo_paragrafo = documento_revisado.add_paragraph(texto_revisado)
-        novo_paragrafo.style = 'Normal' 
+        
+        # Heurística para identificar títulos de capítulo e aplicar estilo "Heading 1"
+        if len(texto_original.strip()) > 0 and (
+            texto_original.strip().lower().startswith("capítulo") or
+            texto_original.strip().lower().startswith("introdução") or
+            texto_original.strip().lower().startswith("prólogo") or
+            texto_original.strip().lower().startswith("epílogo") or
+            texto_original.strip().lower().startswith("conclusão") or
+            (len(texto_original.strip().split()) <= 5 and texto_original.strip().isupper()) # Ex: CAPÍTULO UM
+        ):
+            novo_paragrafo.style = 'Heading 1' 
+            novo_paragrafo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            novo_paragrafo.runs[0].font.size = Pt(18) # Títulos maiores
+            novo_paragrafo.runs[0].font.name = font_name
+            documento_revisado.add_paragraph("") # Espaço após o título
+        else:
+            novo_paragrafo.style = 'Normal'
         
     progress_bar.progress(100, text="Processamento concluído! 🎉")
     st.success(f"Manuscrito revisado, formatado e diagramado no formato {format_data['name']} com estilo '{style_data['font_name']}'.")
 
     # --- INSERÇÃO DA PÁGINA PÓS-TEXTUAL ---
     documento_revisado.add_page_break()
-    about_author_text = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[1]
+    about_author_text_full = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[1].strip()
     
     p_header = documento_revisado.add_paragraph()
     p_header.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_header.add_run("Sobre o Autor").bold = True
     p_header.runs[0].font.size = Pt(16)
     
-    documento_revisado.add_paragraph(about_author_text, style='Normal')
+    documento_revisado.add_paragraph(about_author_text_full, style='Normal')
 
     return documento_revisado, texto_completo
 
 
-# --- 9. Interface do Streamlit (UI) ---
+# --- 10. Interface do Streamlit (UI) ---
 
 # Inicialização dos dados na sessão
 if 'book_title' not in st.session_state:
     st.session_state['book_title'] = "O Último Código de Honra"
     st.session_state['book_author'] = "Carlos Honorato"
+if 'capa_prompt' not in st.session_state:
+    st.session_state['capa_prompt'] = "Uma antiga biblioteca secreta com um livro empoeirado aberto, luz mística emanando dele, estilo arte digital, cores escuras e douradas, suspense."
+if 'generated_image_url' not in st.session_state:
+    st.session_state['generated_image_url'] = None
+
 
 st.markdown("---")
 st.subheader("1. Informações e Formato do Livro")
@@ -323,7 +385,7 @@ with col6:
         help="O processamento de arquivos grandes pode levar alguns minutos."
     )
 
-st.warning("O documento final será um DOCX com PÁGINA DE ROSTO, COPYRIGHT e PÁGINA SOBRE O AUTOR, além do miolo diagramado e revisado.")
+st.warning("O documento final será um DOCX completo com PÁGINA DE ROSTO, COPYRIGHT, SUMÁRIO (instruções), PÁGINA SOBRE O AUTOR, além do miolo diagramado e revisado.")
 
 if uploaded_file is not None and st.button("3. Iniciar PRÉ-IMPRESSÃO COMPLETA"):
     if not st.session_state['book_title'] or not st.session_state['book_author']:
@@ -334,8 +396,9 @@ if uploaded_file is not None and st.button("3. Iniciar PRÉ-IMPRESSÃO COMPLETA"
     
     # --- PASSO 0: Geração dos Elementos Pré-textuais ---
     with st.spinner("Gerando conteúdo de Copyright e a página 'Sobre o Autor' com a IA..."):
-        pre_text_content = gerar_elementos_pre_textuais(st.session_state['book_title'], st.session_state['book_author'], 2025, "Amostra do texto para tom.")
-    
+        # Usamos uma amostra do texto para que a IA capture o tom
+        pre_text_content = gerar_elementos_pre_textuais(st.session_state['book_title'], st.session_state['book_author'], 2025, uploaded_file.getvalue().decode('utf-8', errors='ignore')[:5000])
+
     # Processa o manuscrito (revisão e diagrama)
     documento_revisado, texto_completo = processar_manuscrito(uploaded_file, selected_format_data, selected_style_data, pre_text_content)
     
@@ -346,26 +409,61 @@ if uploaded_file is not None and st.button("3. Iniciar PRÉ-IMPRESSÃO COMPLETA"
             relatorio = gerar_relatorio_estrutural(texto_completo)
         st.text_area("Relatório Estrutural da IA:", relatorio, height=300)
         
-        # --- PASSO B: NOVO: Relatório de Estilo Avançado ---
+        # --- PASSO B: Relatório de Estilo Avançado ---
         st.subheader("RESULTADO 2: Relatório de Estilo (Contra Vícios e Clichês)")
         with st.spinner("Análise de vícios de linguagem e fluidez da escrita..."):
             relatorio_estilo = gerar_relatorio_estilo_avancado(texto_completo)
         st.markdown(relatorio_estilo)
         
-        # --- PASSO C: Geração do Conteúdo da Capa/Contracapa ---
+        # --- PASSO C: Conteúdo de Capa/Contracapa (Marketing) ---
         st.subheader("RESULTADO 3: Conteúdo de Capa/Contracapa (Marketing)")
         with st.spinner("Criando o blurb de marketing e sugestões de design..."):
             conteudo_capa = gerar_conteudo_capa_contracapa(st.session_state['book_title'], st.session_state['book_author'], texto_completo)
         st.text_area("Conteúdo de Vendas e Sugestões de Arte:", conteudo_capa, height=400)
 
-        # --- PASSO D: Cálculos Técnicos DINÂMICOS ---
+        # --- NOVO PASSO D: Geração de Capa com IA ---
+        st.subheader("RESULTADO 4: Criação de Capa com IA")
+        st.markdown("Use o prompt abaixo (ou edite) para gerar uma imagem de capa. Pode levar alguns segundos.")
+        
+        # Preenche o prompt da capa com a sugestão de arte da IA de texto
+        if "SUGESTÃO DE ARTE PARA A CAPA:" in conteudo_capa:
+            sugestao_arte = conteudo_capa.split("SUGESTÃO DE ARTE PARA A CAPA:")[1].strip()
+            st.session_state['capa_prompt'] = st.text_area("Prompt para a Imagem da Capa:", sugestao_arte, height=100)
+        else:
+            st.session_state['capa_prompt'] = st.text_area("Prompt para a Imagem da Capa:", st.session_state['capa_prompt'], height=100)
+
+        if st.button("Gerar Capa com IA"):
+            with st.spinner("Gerando imagem de capa com DALL-E 3..."):
+                image_output = gerar_capa_ia(st.session_state['capa_prompt'])
+                if "http" in image_output: # Se for uma URL, foi bem-sucedido
+                    st.session_state['generated_image_url'] = image_output
+                    st.success("Capa gerada com sucesso!")
+                else:
+                    st.error(image_output) # Exibe a mensagem de erro da IA
+
+        if st.session_state['generated_image_url']:
+            st.image(st.session_state['generated_image_url'], caption="Capa Sugerida pela IA", use_column_width=True)
+            # Botão para baixar a imagem (opcional)
+            try:
+                response = requests.get(st.session_state['generated_image_url'])
+                if response.status_code == 200:
+                    st.download_button(
+                        label="Baixar Imagem da Capa (.png)",
+                        data=response.content,
+                        file_name=f"Capa_IA_{st.session_state['book_title'].replace(' ', '_')}.png",
+                        mime="image/png"
+                    )
+            except Exception as e:
+                st.warning(f"Não foi possível baixar a imagem da capa: {e}")
+
+        # --- PASSO E: Cálculos Técnicos DINÂMICOS ---
         papel_fator = selected_format_data['papel_fator'] 
         espessura_cm = round(page_count * papel_fator, 2) 
         capa_largura_total_cm = round((selected_format_data['width_cm'] * 2) + espessura_cm, 2)
         capa_altura_total_cm = round(selected_format_data['height_cm'] + 0.6, 2)
 
-        # --- PASSO E: Geração do Relatório de Conformidade KDP ---
-        st.subheader("RESULTADO 4: Relatório de Conformidade KDP (Amazon)")
+        # --- PASSO F: Geração do Relatório de Conformidade KDP ---
+        st.subheader("RESULTADO 5: Relatório de Conformidade KDP (Amazon)")
         with st.spinner("Gerando checklist técnico e de SEO para o upload na Amazon..."):
             relatorio_kdp = gerar_relatorio_conformidade_kdp(
                 st.session_state['book_title'], st.session_state['book_author'], page_count, selected_format_data, 
@@ -374,8 +472,8 @@ if uploaded_file is not None and st.button("3. Iniciar PRÉ-IMPRESSÃO COMPLETA"
         st.markdown(relatorio_kdp)
 
         
-        # --- PASSO F: Resumo Técnico Final e Downloads ---
-        st.subheader("RESULTADO 5: Resumo Técnico Final e Downloads")
+        # --- PASSO G: Resumo Técnico Final e Downloads ---
+        st.subheader("RESULTADO 6: Resumo Técnico Final e Downloads")
         
         st.markdown(f"""
         O seu produto de pré-impressão está pronto. A diagramação foi aplicada no formato **{selected_format_data['name']}** com o estilo **{selected_style_data['font_name']}**.
@@ -387,7 +485,7 @@ if uploaded_file is not None and st.button("3. Iniciar PRÉ-IMPRESSÃO COMPLETA"
         """)
 
 
-        # --- PASSO G: Download dos Arquivos ---
+        # --- PASSO H: Download dos Arquivos ---
         st.markdown("#### ⬇️ Downloads Finais")
         
         # Download do DOCX Diagramado
