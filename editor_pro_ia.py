@@ -40,29 +40,23 @@ st.subheader("Transforme seu manuscrito em um livro profissional, pronto para AB
 client = None
 API_KEY = None
 PROJECT_ID = None
+is_api_ready = False # Inicializa como False
 
 try:
     # Tenta carregar as chaves do Streamlit Secrets
     if hasattr(st, 'secrets'):
          if API_KEY_NAME in st.secrets and PROJECT_ID_NAME in st.secrets:
-             # Usa .get para evitar KeyError caso a chave exista mas seja None
              API_KEY = st.secrets.get(API_KEY_NAME) 
              PROJECT_ID = st.secrets.get(PROJECT_ID_NAME)
     
-    # Se as chaves estiverem presentes e não forem None/Empty (mesmo que seja a dummy key)
-    # A diferença é que a dummy key falhará na chamada real, mas passará nesta inicialização
     if API_KEY and PROJECT_ID:
-        # Tenta inicializar o cliente. A validação real ocorre na primeira chamada.
         client = OpenAI(api_key=API_KEY, project=PROJECT_ID)
-    
-    # Verifica se o cliente foi inicializado, mas pode ainda ter uma chave inválida.
-    is_api_ready = client is not None
+        is_api_ready = True # Define como True se o cliente for inicializado
     
     if not is_api_ready:
         st.warning(f"Chave e ID do Projeto OpenAI não configurados. A revisão e a geração de capa **NÃO** funcionarão. Por favor, adicione '{API_KEY_NAME}' e '{PROJECT_ID_NAME}' no Streamlit Secrets.")
 
 except Exception as e:
-    # Este catch é mais para erros de ambiente do Streamlit, não da API
     st.error(f"Erro na inicialização do ambiente (secrets). Detalhes: {e}")
     client = None
     is_api_ready = False
@@ -73,7 +67,6 @@ except Exception as e:
 def call_openai_api(system_prompt: str, user_content: str, max_tokens: int = 3000, retries: int = 3) -> str:
     """Função genérica para chamar a API da OpenAI com backoff exponencial."""
     
-    # Verifica a prontidão da API antes de qualquer chamada
     if not is_api_ready:
         return "[ERRO DE CONEXÃO DA API] Chaves OPENAI_API_KEY e/ou OPENAI_PROJECT_ID não configuradas. Verifique Streamlit Secrets."
 
@@ -92,19 +85,15 @@ def call_openai_api(system_prompt: str, user_content: str, max_tokens: int = 300
         except Exception as e:
             error_msg = str(e)
             
-            # Tratamento específico para autenticação (401) e Rate Limit (429)
             if "Invalid API key" in error_msg or "Error code: 401" in error_msg:
-                 # Erro fatal de autenticação, não tenta novamente
-                 st.error(f"ERRO DE AUTENTICAÇÃO: Sua chave de API está incorreta ou expirada. Use uma nova chave. Detalhes: {error_msg}")
+                 st.error(f"ERRO DE AUTENTICAÇÃO: Sua chave de API está incorreta ou expirada. Detalhes: {error_msg}")
                  return "[ERRO DE CONEXÃO DA API] Chave de API Inválida."
 
             elif "Rate limit reached" in error_msg or "Error code: 429" in error_msg and i < retries - 1:
-                # Tenta novamente em caso de Rate Limit
                 wait_time = 2 ** i
                 st.warning(f"Limite de taxa atingido. Tentando novamente em {wait_time} segundos... (Tentativa {i+1}/{retries})")
                 time.sleep(wait_time)
             else:
-                # Outros erros (rede, servidor, etc.)
                 st.error(f"Falha ao se comunicar com a OpenAI. Detalhes: {e}")
                 return f"[ERRO DE CONEXÃO DA API] Falha: {e}"
                 
@@ -244,11 +233,9 @@ def gerar_capa_ia_completa(prompt_visual: str, blurb: str, autor: str, titulo: s
     Chama a API DALL-E 3 para gerar a imagem da capa COMPLETA (Frente, Lombada e Verso).
     """
     
-    # Verifica a prontidão da API
     if not is_api_ready:
         return "[ERRO GERAÇÃO DE CAPA] Chaves OPENAI_API_KEY e/ou OPENAI_PROJECT_ID não configuradas. Verifique Streamlit Secrets."
         
-    # Prompt avançado para DALL-E 3 para forçar o layout de capa completa
     full_prompt = f"""
     Crie uma imagem de CAPA COMPLETA E ÚNICA para impressão. As dimensões físicas totais (largura x altura) são: {largura_cm} cm x {altura_cm} cm. A lombada tem {espessura_cm} cm de espessura.
 
@@ -274,9 +261,13 @@ def gerar_capa_ia_completa(prompt_visual: str, blurb: str, autor: str, titulo: s
         return f"[ERRO GERAÇÃO DE CAPA] Falha ao gerar a imagem: {e}. Verifique se sua conta OpenAI tem créditos para DALL-E 3 e se o prompt não viola as diretrizes."
 
 # --- FUNÇÃO PRINCIPAL DE DIAGRAMAÇÃO E REVISÃO ---
-def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices_abnt, status_placeholder):
-    # is_api_ready é uma variável global
+# O status_container agora é um st.container() seguro, em vez de st.empty()
+def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices_abnt, status_container): 
+    
     global is_api_ready 
+    
+    # 1. Limpa o container de status no início do processo
+    status_container.empty()
 
     documento_original = Document(uploaded_file)
     documento_revisado = Document()
@@ -285,7 +276,6 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
     section = documento_revisado.sections[0]
     section.page_width = Inches(format_data['width_in'])
     section.page_height = Inches(format_data['height_in'])
-    # Margens ajustadas para KDP: 1.0 pol (lombada), 0.6 pol (fora)
     section.left_margin = Inches(1.0) 
     section.right_margin = Inches(0.6) 
     section.top_margin = Inches(0.8)
@@ -305,7 +295,9 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
     paragraph_format.first_line_indent = Inches(indent_in) 
     
     # --- 3. Geração dos Elementos Pré-textuais ---
-    status_placeholder.info("Fase 1/3: Gerando conteúdo de Copyright e 'Sobre o Autor'...")
+    with status_container:
+        st.info("Fase 1/3: Gerando conteúdo de Copyright e 'Sobre o Autor'...")
+    
     uploaded_file.seek(0)
     manuscript_sample = uploaded_file.getvalue().decode('utf-8', errors='ignore')[:5000]
 
@@ -321,15 +313,14 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
         """
 
     # --- 4. Inserção de Elementos Pré-textuais no DOCX ---
+    # ... (Code to insert pages remains the same)
     
     # Página de Rosto (Título e Autor)
     adicionar_pagina_rosto(documento_revisado, st.session_state['book_title'], st.session_state['book_author'], style_data)
     
     # Página de Copyright
     try:
-        # Pega a parte de Copyright, ignorando o cabeçalho '### 2. Página 'Sobre o Autor''
         copyright_text_full = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[0].strip() 
-        # Tenta remover o cabeçalho '### 1. Página de Copyright e Créditos' se ele ainda estiver lá
         copyright_text_full = copyright_text_full.replace("### 1. Página de Copyright e Créditos", "").strip() 
     except IndexError:
         copyright_text_full = "[Erro ao extrair o texto de Copyright. Verifique a conexão da API.]"
@@ -353,7 +344,10 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
     total_paragrafos = len(paragrafos)
     texto_completo = ""
     
-    progress_bar = st.progress(0, text="Revisando e diagramando o miolo... 0%")
+    # MUITO IMPORTANTE: Define a barra de progresso dentro do container
+    with status_container:
+        progress_text = "Revisando e diagramando o miolo... 0%"
+        progress_bar = st.progress(0, text=progress_text)
     
     for i, paragrafo in enumerate(paragrafos):
         texto_original = paragrafo.text
@@ -366,7 +360,6 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
             documento_revisado.add_paragraph(texto_original)
             continue 
 
-        # Chama a IA para revisão se a chave estiver configurada
         if is_api_ready:
             texto_revisado = revisar_paragrafo(texto_original)
         else:
@@ -374,7 +367,7 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
 
         novo_paragrafo = documento_revisado.add_paragraph(texto_revisado)
         
-        # Heurística para Títulos de Capítulo (Marcação 'Heading 1' para TOC)
+        # Heurística para Títulos de Capítulo
         if len(texto_original.strip()) > 0 and (
             texto_original.strip().lower().startswith("capítulo") or
             texto_original.strip().lower().startswith("introdução") or
@@ -388,8 +381,11 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
             documento_revisado.add_paragraph("") 
         else:
             novo_paragrafo.style = 'Normal'
-        
-    progress_bar.progress(100, text="Fase 2/3: Revisão e diagramação do miolo concluída! 🎉")
+    
+    # Após o loop, limpa a barra de progresso e mostra o sucesso.
+    with status_container:
+        progress_bar.empty()
+        st.success("Fase 2/3: Revisão e diagramação do miolo concluída! 🎉")
 
     # --- 6. Inserção da Página Pós-Textual ---
     documento_revisado.add_page_break()
@@ -400,7 +396,6 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
         about_author_text_full = "[Erro ao extrair a bio do Autor. Verifique a conexão da API.]"
     
     adicionar_pagina_generica(documento_revisado, "Sobre o Autor", "Sua biografia gerada pela IA")
-    # Adiciona a bio do autor
     documento_revisado.add_paragraph(about_author_text_full, style='Normal')
 
     
@@ -409,13 +404,17 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
         adicionar_pagina_generica(documento_revisado, "Anexo I", "Título do Anexo")
 
     # --- 7. Geração do Blurb de Marketing (para uso na próxima tab) ---
-    status_placeholder.info("Fase 3/3: Gerando Blurb de Marketing e preparando para análise...")
+    with status_container:
+        st.info("Fase 3/3: Gerando Blurb de Marketing e preparando para análise...")
     
     if is_api_ready:
         blurb_gerado = gerar_conteudo_marketing(st.session_state['book_title'], st.session_state['book_author'], texto_completo)
     else:
         blurb_gerado = "[Blurb não gerado. Conecte a API para um texto de vendas profissional.]"
 
+    with status_container:
+        st.empty() # Limpa a última mensagem de status
+        
     return documento_revisado, texto_completo, blurb_gerado
 
 # --- INICIALIZAÇÃO DE ESTADO ---
@@ -432,7 +431,7 @@ if 'book_title' not in st.session_state:
     st.session_state['format_option'] = "Padrão A5 (5.83x8.27 in)"
     st.session_state['incluir_indices_abnt'] = False
     if 'style_option' not in st.session_state:
-         st.session_state['style_option'] = "Romance Clássico (Garamond)" # Inicializa com um valor padrão
+         st.session_state['style_option'] = "Romance Clássico (Garamond)" 
 
 # --- CÁLCULOS DINÂMICOS (Executados em todas as execuções do script) ---
 format_option_default = "Padrão A5 (5.83x8.27 in)"
@@ -468,39 +467,35 @@ with config_tab:
     
     col3, col4, col5 = st.columns(3)
     with col3:
-        # Salva o formato escolhido no session_state
         st.session_state['format_option'] = st.selectbox(
             "Tamanho de Corte Final (KDP/Gráfica):",
             options=list(KDP_SIZES.keys()),
-            index=list(KDP_SIZES.keys()).index(st.session_state['format_option']), # Mantém o estado
+            index=list(KDP_SIZES.keys()).index(st.session_state['format_option']), 
         )
         selected_format_data = KDP_SIZES[st.session_state['format_option']]
     
     with col4:
-        # Pega o estilo de volta, ou define o padrão se for a primeira vez
         default_style_key = "Romance Clássico (Garamond)"
-        
-        # Tenta pegar o valor atual do session state ou usa o default
         current_style_key = st.session_state.get('style_option', default_style_key) 
         
         style_option = st.selectbox(
             "Template de Estilo de Diagramação:",
             options=list(STYLE_TEMPLATES.keys()),
             index=list(STYLE_TEMPLATES.keys()).index(current_style_key), 
-            key='style_option', # Usa uma chave de estado para o selectbox
+            key='style_option', 
             help="Define fonte, tamanho e espaçamento (Ex: ABNT para trabalhos acadêmicos)."
         )
         selected_style_data = STYLE_TEMPLATES[style_option]
-        st.session_state['style_option'] = style_option # Atualiza o estado
+        st.session_state['style_option'] = style_option 
         
     with col5:
         incluir_indices_abnt = st.checkbox(
             "Incluir Índices/Apêndices ABNT", 
             value=st.session_state['incluir_indices_abnt'], 
-            key='incluir_indices_abnt_checkbox', # Usa uma chave de estado para o checkbox
+            key='incluir_indices_abnt_checkbox', 
             help="Adiciona placeholders para Sumário, Índice de Tabelas, Apêndices e Anexos."
         )
-        st.session_state['incluir_indices_abnt'] = incluir_indices_abnt # Atualiza o estado
+        st.session_state['incluir_indices_abnt'] = incluir_indices_abnt 
         
     st.subheader("Upload do Manuscrito")
     uploaded_file = st.file_uploader(
@@ -523,34 +518,32 @@ with miolo_tab:
     if uploaded_file is None:
         st.warning("Por favor, carregue um arquivo .docx na aba '1. Configuração Inicial' para começar.")
     else:
+        # MUITO IMPORTANTE: Usa st.container() para agrupar as mensagens de status
+        status_container = st.container() 
         
         if st.button("▶️ Iniciar Processamento do Miolo (Diagramação e Revisão)"):
             if not is_api_ready:
                 st.error("Atenção: As chaves OpenAI não estão configuradas. Apenas a diagramação do miolo e a geração do blurb (placeholder) serão realizadas. A revisão da IA será ignorada.")
             
-            st.info("Processamento iniciado! Acompanhe o progresso abaixo...")
-            status_placeholder = st.empty()
+            with status_container:
+                st.info("Processamento iniciado! Acompanhe o progresso abaixo...")
             
-            # Recarrega dados de estado
             selected_format_data = KDP_SIZES[st.session_state['format_option']]
-            # Garante que selected_style_data é carregado a partir do estado do selectbox
             selected_style_data = STYLE_TEMPLATES[st.session_state.get('style_option', "Romance Clássico (Garamond)")] 
             
-            # --- Executa o processamento em passos (Fases 1 a 3) ---
             uploaded_file.seek(0)
             documento_revisado, texto_completo, blurb_gerado = processar_manuscrito(
                 uploaded_file, 
                 selected_format_data, 
                 selected_style_data, 
                 st.session_state['incluir_indices_abnt'], 
-                status_placeholder
+                status_container # Passa o container seguro
             )
             
             st.session_state['documento_revisado'] = documento_revisado
             st.session_state['texto_completo'] = texto_completo
-            st.session_state['blurb'] = blurb_gerado # Atualiza o blurb gerado
+            st.session_state['blurb'] = blurb_gerado 
             
-            status_placeholder.success("Miolo revisado, diagramado e elementos essenciais inseridos! Prossiga para a Capa.")
             st.toast("Miolo Pronto!", icon="✅")
             
         if st.session_state['documento_revisado']:
@@ -559,7 +552,6 @@ with miolo_tab:
             
             st.subheader("Intervenção: Blurb da Contracapa")
             st.warning("O Blurb abaixo será usado no design da Capa Completa e no relatório de análise. Edite-o antes de gerar a capa.")
-            # Usa a mesma chave para manter o estado
             st.session_state['blurb'] = st.text_area("Texto de Vendas (Blurb):", st.session_state['blurb'], height=300, key='blurb_text_area')
 
 
@@ -624,13 +616,10 @@ with export_tab:
     if not st.session_state.get('documento_revisado'):
         st.warning("Por favor, execute o processamento do Miolo (Aba 2) antes de exportar.")
     else:
-        
-        # is_api_ready é uma variável global
 
         # --- Relatório Estrutural ---
         st.subheader("1. Relatório Estrutural (Editor-Chefe)")
         if is_api_ready:
-            # Geração do Relatório Estrutural (se ainda não gerado)
             if 'relatorio_estrutural' not in st.session_state or st.button("Gerar/Atualizar Relatório Estrutural"):
                  with st.spinner("Analisando ritmo e personagens..."):
                     relatorio = gerar_relatorio_estrutural(st.session_state['texto_completo'])
@@ -639,7 +628,7 @@ with export_tab:
             if st.session_state.get('relatorio_estrutural') and "[ERRO DE CONEXÃO DA API]" not in st.session_state['relatorio_estrutural']:
                  st.markdown(st.session_state['relatorio_estrutural'])
             elif st.session_state.get('relatorio_estrutural'):
-                 st.error(st.session_state['relatorio_estrutural']) # Mostra o erro da API se não conseguir gerar
+                 st.error(st.session_state['relatorio_estrutural']) 
             else:
                  st.info("Clique no botão acima para gerar o Relatório Estrutural.")
 
@@ -663,7 +652,7 @@ with export_tab:
             st.subheader("2. Relatório de Conformidade KDP (Amazon)")
             st.markdown(st.session_state['relatorio_kdp'])
         elif st.session_state.get('relatorio_kdp'):
-             st.error(st.session_state['relatorio_kdp']) # Mostra o erro da API se não conseguir gerar
+             st.error(st.session_state['relatorio_kdp']) 
 
         # --- Downloads Finais ---
         st.subheader("3. Exportar Produtos Finais")
