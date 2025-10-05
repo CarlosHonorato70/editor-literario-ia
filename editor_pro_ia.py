@@ -36,31 +36,41 @@ st.set_page_config(page_title="Editor Pro IA", layout="wide")
 st.title("🚀 Editor Pro IA: Publicação Sem Complicações")
 st.subheader("Transforme seu manuscrito em um livro profissional, pronto para ABNT e KDP.")
 
+# Variáveis globais para rastrear o status da API
+client = None
+API_KEY = None
+PROJECT_ID = None
+
 try:
-    API_KEY = None
-    PROJECT_ID = None
+    # Tenta carregar as chaves do Streamlit Secrets
     if hasattr(st, 'secrets'):
-         if API_KEY_NAME in st.secrets:
+         if API_KEY_NAME in st.secrets and PROJECT_ID_NAME in st.secrets:
              API_KEY = st.secrets.get(API_KEY_NAME)
-         if PROJECT_ID_NAME in st.secrets:
              PROJECT_ID = st.secrets.get(PROJECT_ID_NAME)
     
-    # Se as chaves estiverem vazias ou não encontradas, use dummy keys
-    if not API_KEY or not PROJECT_ID:
-        st.warning(f"Chave e ID do Projeto OpenAI não configurados. A revisão e a geração de capa não funcionarão. Por favor, adicione '{API_KEY_NAME}' e '{PROJECT_ID_NAME}' no Streamlit Secrets.")
-        client = OpenAI(api_key="dummy_key", project="dummy_project")
-    else:
+    # Se as chaves estiverem presentes, inicializa o cliente
+    if API_KEY and PROJECT_ID:
         client = OpenAI(api_key=API_KEY, project=PROJECT_ID)
+    else:
+        st.warning(f"Chave e ID do Projeto OpenAI não configurados. A revisão e a geração de capa **NÃO** funcionarão. Por favor, adicione '{API_KEY_NAME}' e '{PROJECT_ID_NAME}' no Streamlit Secrets.")
 
 except Exception as e:
     st.error(f"Erro na inicialização da API: {e}")
-    client = OpenAI(api_key="dummy_key", project="dummy_project")
+    client = None
+
+# Verifica se o cliente foi inicializado com sucesso
+is_api_ready = client is not None
 
 
 # --- FUNÇÕES DE AUXÍLIO ---
 
 def call_openai_api(system_prompt: str, user_content: str, max_tokens: int = 3000, retries: int = 3) -> str:
     """Função genérica para chamar a API da OpenAI com backoff exponencial."""
+    
+    # Verifica a prontidão da API antes de qualquer chamada
+    if not is_api_ready:
+        return "[ERRO DE CONEXÃO DA API] Chaves OPENAI_API_KEY e/ou OPENAI_PROJECT_ID não configuradas. Verifique Streamlit Secrets."
+
     for i in range(retries):
         try:
             response = client.chat.completions.create(
@@ -217,6 +227,10 @@ def gerar_capa_ia_completa(prompt_visual: str, blurb: str, autor: str, titulo: s
     Chama a API DALL-E 3 para gerar a imagem da capa COMPLETA (Frente, Lombada e Verso).
     """
     
+    # Verifica a prontidão da API
+    if not is_api_ready:
+        return "[ERRO GERAÇÃO DE CAPA] Chaves OPENAI_API_KEY e/ou OPENAI_PROJECT_ID não configuradas. Verifique Streamlit Secrets."
+        
     # Prompt avançado para DALL-E 3 para forçar o layout de capa completa
     full_prompt = f"""
     Crie uma imagem de CAPA COMPLETA E ÚNICA para impressão. As dimensões físicas totais (largura x altura) são: {largura_cm} cm x {altura_cm} cm. A lombada tem {espessura_cm} cm de espessura.
@@ -244,8 +258,8 @@ def gerar_capa_ia_completa(prompt_visual: str, blurb: str, autor: str, titulo: s
 
 # --- FUNÇÃO PRINCIPAL DE DIAGRAMAÇÃO E REVISÃO ---
 def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices_abnt, status_placeholder):
-    # Verifica se a API está configurada
-    is_api_ready = API_KEY and API_KEY != "dummy_key"
+    # is_api_ready é uma variável global
+    global is_api_ready 
 
     documento_original = Document(uploaded_file)
     documento_revisado = Document()
@@ -296,12 +310,15 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
     
     # Página de Copyright
     try:
-        copyright_text_full = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[0].strip()
+        # Pega a parte de Copyright, ignorando o cabeçalho '### 2. Página 'Sobre o Autor''
+        copyright_text_full = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[0].strip() 
+        # Tenta remover o cabeçalho '### 1. Página de Copyright e Créditos' se ele ainda estiver lá
+        copyright_text_full = copyright_text_full.replace("### 1. Página de Copyright e Créditos", "").strip() 
     except IndexError:
         copyright_text_full = "[Erro ao extrair o texto de Copyright. Verifique a conexão da API.]"
     
     documento_revisado.add_paragraph("### 1. Página de Copyright e Créditos").bold = True
-    p_copy = documento_revisado.add_paragraph(copyright_text_full.replace("### 1. Página de Copyright e Créditos", "").strip())
+    p_copy = documento_revisado.add_paragraph(copyright_text_full)
     p_copy.style = 'Normal'
     p_copy.runs[0].font.size = Pt(8) 
     documento_revisado.add_page_break()
@@ -361,11 +378,14 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
     documento_revisado.add_page_break()
     try:
         about_author_text_full = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[1].strip()
+        about_author_text_full = about_author_text_full.replace("### 2. Página 'Sobre o Autor'", "").strip() # Remove o cabeçalho
     except IndexError:
         about_author_text_full = "[Erro ao extrair a bio do Autor. Verifique a conexão da API.]"
     
     adicionar_pagina_generica(documento_revisado, "Sobre o Autor", "Sua biografia gerada pela IA")
+    # Adiciona a bio do autor
     documento_revisado.add_paragraph(about_author_text_full, style='Normal')
+
     
     if incluir_indices_abnt:
         adicionar_pagina_generica(documento_revisado, "Apêndice A", "Título do Apêndice")
@@ -394,6 +414,8 @@ if 'book_title' not in st.session_state:
     st.session_state['relatorio_kdp'] = ""
     st.session_state['format_option'] = "Padrão A5 (5.83x8.27 in)"
     st.session_state['incluir_indices_abnt'] = False
+    if 'style_option' not in st.session_state:
+         st.session_state['style_option'] = "Romance Clássico (Garamond)" # Inicializa com um valor padrão
 
 # --- CÁLCULOS DINÂMICOS (Executados em todas as execuções do script) ---
 format_option_default = "Padrão A5 (5.83x8.27 in)"
@@ -486,7 +508,7 @@ with miolo_tab:
     else:
         
         if st.button("▶️ Iniciar Processamento do Miolo (Diagramação e Revisão)"):
-            if not API_KEY or API_KEY == "dummy_key":
+            if not is_api_ready:
                 st.error("Atenção: As chaves OpenAI não estão configuradas. Apenas a diagramação do miolo e a geração do blurb (placeholder) serão realizadas. A revisão da IA será ignorada.")
             
             st.info("Processamento iniciado! Acompanhe o progresso abaixo...")
@@ -495,7 +517,7 @@ with miolo_tab:
             # Recarrega dados de estado
             selected_format_data = KDP_SIZES[st.session_state['format_option']]
             # Garante que selected_style_data é carregado a partir do estado do selectbox
-            selected_style_data = STYLE_TEMPLATES[st.session_state.get('style_option', default_style_key)] 
+            selected_style_data = STYLE_TEMPLATES[st.session_state.get('style_option', "Romance Clássico (Garamond)")] 
             
             # --- Executa o processamento em passos (Fases 1 a 3) ---
             uploaded_file.seek(0)
@@ -515,7 +537,7 @@ with miolo_tab:
             st.toast("Miolo Pronto!", icon="✅")
             
         if st.session_state['documento_revisado']:
-            selected_style_data = STYLE_TEMPLATES[st.session_state.get('style_option', default_style_key)] 
+            selected_style_data = STYLE_TEMPLATES[st.session_state.get('style_option', "Romance Clássico (Garamond)")] 
             st.success(f"Miolo diagramado no formato **{st.session_state['format_option']}** com o estilo **'{selected_style_data['font_name']}'**.")
             
             st.subheader("Intervenção: Blurb da Contracapa")
@@ -551,7 +573,7 @@ with capa_tab:
         st.warning(f"Atenção: O modelo DALL-E 3 gera uma imagem do design COMPLETO com as dimensões de **{capa_largura_total_cm}cm x {capa_altura_total_cm}cm** (calculado).")
 
         if st.button("🎨 Gerar Capa COMPLETA com IA"):
-            if not API_KEY or API_KEY == "dummy_key":
+            if not is_api_ready:
                 st.error("Chaves OpenAI não configuradas. Não é possível gerar a imagem.")
             else:
                 with st.spinner("Gerando design completo da capa (Frente, Lombada e Verso)... Este processo usa DALL-E 3 e pode levar até um minuto."):
@@ -586,7 +608,7 @@ with export_tab:
         st.warning("Por favor, execute o processamento do Miolo (Aba 2) antes de exportar.")
     else:
         
-        is_api_ready = API_KEY and API_KEY != "dummy_key"
+        # is_api_ready é uma variável global
 
         # --- Relatório Estrutural ---
         st.subheader("1. Relatório Estrutural (Editor-Chefe)")
@@ -597,7 +619,13 @@ with export_tab:
                     relatorio = gerar_relatorio_estrutural(st.session_state['texto_completo'])
                     st.session_state['relatorio_estrutural'] = relatorio
             
-            st.markdown(st.session_state['relatorio_estrutural'])
+            if st.session_state.get('relatorio_estrutural') and "[ERRO DE CONEXÃO DA API]" not in st.session_state['relatorio_estrutural']:
+                 st.markdown(st.session_state['relatorio_estrutural'])
+            elif st.session_state.get('relatorio_estrutural'):
+                 st.error(st.session_state['relatorio_estrutural']) # Mostra o erro da API se não conseguir gerar
+            else:
+                 st.info("Clique no botão acima para gerar o Relatório Estrutural.")
+
         else:
             st.warning("Relatório Estrutural não gerado. Conecte a API para receber o feedback do Editor-Chefe.")
         
@@ -614,9 +642,11 @@ with export_tab:
             else:
                 st.error("Conecte a API para gerar o Relatório KDP.")
         
-        if st.session_state['relatorio_kdp']:
+        if st.session_state['relatorio_kdp'] and "[ERRO DE CONEXÃO DA API]" not in st.session_state['relatorio_kdp']:
             st.subheader("2. Relatório de Conformidade KDP (Amazon)")
             st.markdown(st.session_state['relatorio_kdp'])
+        elif st.session_state.get('relatorio_kdp'):
+             st.error(st.session_state['relatorio_kdp']) # Mostra o erro da API se não conseguir gerar
 
         # --- Downloads Finais ---
         st.subheader("3. Exportar Produtos Finais")
