@@ -16,18 +16,14 @@ import json
 
 # --- CONFIGURAÇÃO DE CONSTANTES GERAIS ---
 
-# Versão da API Azure OpenAI
-AZURE_API_VERSION = '2024-02-01'
-
 KDP_SIZES: Dict[str, Dict] = {
     "Padrão EUA (6x9 in)": {"name": "6 x 9 in", "width_in": 6.0, "height_in": 9.0, "width_cm": 15.24, "height_cm": 22.86}, 
     "Padrão A5 (5.83x8.27 in)": {"name": "A5 (14.8 x 21 cm)", "width_in": 5.83, "height_in": 8.27, "width_cm": 14.8, "height_cm": 21.0},
     "Pocket (5x8 in)": {"name": "5 x 8 in", "width_in": 5.0, "height_in": 8.0, "width_cm": 12.7, "height_cm": 20.32},
 }
 
-# Configurações de Formatação (Simulação ABNT/KDP)
-# Configurado para Arial (Mudar para 'Georgia' se preferir fonte Serifada)
-FONT_NAME = 'Arial' 
+# Configurações de Formatação (Miolo de Livro KDP/Gráfica)
+FONT_NAME = 'Arial' # Fonte do corpo do texto. Mudar para 'Georgia' se preferir serifada.
 BODY_FONT_SIZE = Pt(12)
 TITLE_FONT_SIZE = Pt(14)
 LINE_SPACING = 1.5
@@ -52,8 +48,6 @@ def init_state():
         st.session_state['book_size'] = "Padrão EUA (6x9 in)"
     if 'openai_client' not in st.session_state:
         st.session_state['openai_client'] = None
-    if 'azure_deployment_name' not in st.session_state:
-        st.session_state['azure_deployment_name'] = ""
     if 'generated_image_url' not in st.session_state:
         st.session_state['generated_image_url'] = None
     if 'document_bytes' not in st.session_state:
@@ -68,34 +62,27 @@ def init_state():
 # Inicializa o estado
 init_state()
 
-# --- FUNÇÕES DE CONEXÃO E LLM AZURE ---
+# --- FUNÇÕES DE CONEXÃO E LLM (OPENAI PADRÃO) ---
 
-def get_client(endpoint: str, key: str, deployment: str) -> Optional[OpenAI]:
-    """Cria e retorna uma instância do cliente OpenAI configurada para Azure."""
-    if not (endpoint and key and deployment):
+def get_client(api_key: str) -> Optional[OpenAI]:
+    """Cria e retorna uma instância do cliente OpenAI."""
+    if not api_key:
         return None
     try:
-        # Tenta criar o cliente usando as configurações do Azure
-        client = OpenAI(
-            api_key=key,
-            api_version=AZURE_API_VERSION,
-            azure_endpoint=endpoint
-        )
-        st.session_state['azure_deployment_name'] = deployment 
+        # Cliente OpenAI padrão (sem Azure)
+        client = OpenAI(api_key=api_key)
         return client
     except Exception as e:
-        # Captura erros de inicialização (ex: formato incorreto de endpoint)
-        st.error(f"Erro ao inicializar o cliente Azure: {e}")
+        st.error(f"Erro ao inicializar o cliente OpenAI: {e}")
         return None
 
 def generate_text_content(prompt: str, client: OpenAI, title: str, genre: str, previous_chapters: List[Dict[str, Any]] = None) -> str:
-    """Gera o conteúdo de um novo capítulo usando o Deployment do Azure."""
-    deployment_name = st.session_state.get('azure_deployment_name')
-    if not (client and deployment_name):
-        return "Erro: Configuração do Azure incompleta ou cliente não inicializado."
+    """Gera o conteúdo de um novo capítulo usando GPT-4o-mini."""
+    if not client:
+        return "Erro: Chave OpenAI não configurada ou cliente não inicializado."
     
-    # O Azure usa o deployment_name no campo 'model'
-    model_to_use = deployment_name 
+    # Modelo padrão da OpenAI
+    model_to_use = "gpt-4o-mini" 
 
     messages = [{"role": "system", "content": f"Você é um autor de best-sellers de {genre}. Escreva o próximo capítulo do livro '{title}'. O capítulo deve ter cerca de 1000 palavras."}]
     if previous_chapters:
@@ -113,7 +100,7 @@ def generate_text_content(prompt: str, client: OpenAI, title: str, genre: str, p
         )
         return response.choices[0].message.content
     except Exception as e:
-        return f"Erro na geração de texto no Azure: Verifique se o Deployment '{deployment_name}' existe no seu Endpoint e se a chave está correta. Detalhes: {e}"
+        return f"Erro na geração de texto na OpenAI: Verifique se a chave está correta e tem créditos. Detalhes: {e}"
 
 # --- FUNÇÃO DE PROCESSAMENTO DE MANUSCRITO ENVIADO (Mantida igual) ---
 
@@ -180,10 +167,10 @@ def process_uploaded_manuscript(uploaded_file, client: Optional[OpenAI]):
 
 def set_update_fields_on_open(doc: Document):
     """
-    *** FUNÇÃO CRÍTICA PARA AUTOMATIZAÇÃO DO SUMÁRIO E PÁGINAS ***
+    *** AUTOMAÇÃO CRÍTICA PARA ATUALIZAÇÃO DO SUMÁRIO E PÁGINAS ***
     Adiciona a configuração XML ao documento para forçar o Microsoft Word 
-    a atualizar todos os campos (incluindo Sumário/TOC e numeração/PAGE) na abertura.
-    Isto automatiza a etapa manual do usuário.
+    a atualizar todos os campos (TOC e PAGE) na abertura.
+    Isto evita que o usuário precise clicar com o botão direito e atualizar.
     """
     settings = doc.settings
     element = settings.element.xpath('//w:updateFields')
@@ -201,7 +188,7 @@ def apply_abnt_style(doc: Document):
     section = doc.sections[0]
     section.page_width = Inches(size_config['width_in'])
     section.page_height = Inches(size_config['height_in'])
-    # Inverte as margens para obedecer o padrão de encadernação (Inner/Outer)
+    # Define as margens (Miolo de Livro)
     section.left_margin = MARGIN_INNER
     section.right_margin = MARGIN_OUTER
     section.top_margin = MARGIN_TOP
@@ -217,7 +204,7 @@ def apply_abnt_style(doc: Document):
     paragraph_format.space_after = Pt(0)
     paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY # Justificado
 
-    # Estilo Título de Capítulo (Heading 1)
+    # Estilo Título de Capítulo (Heading 1) - Usado para o Sumário
     try:
         title_style = doc.styles['Heading 1']
     except KeyError:
@@ -255,7 +242,40 @@ def add_table_of_contents(doc: Document):
     run._element.append(fldChar)
     
     doc.add_page_break()
+    
+def add_page_numbers(doc: Document):
+    """Adiciona numeração de página (Campo PAGE) no rodapé."""
+    
+    for section in doc.sections:
+        footer = section.footer
+        
+        # Limpa o rodapé atual para garantir que não haja texto duplicado
+        for p in list(footer.paragraphs):
+            footer._element.remove(p._element)
 
+        p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+        # Campo para o número da página (PAGE)
+        run = p.add_run()
+        
+        fldChar_begin = OxmlElement('w:fldChar')
+        fldChar_begin.set(qn('w:fldCharType'), 'begin')
+        run._element.append(fldChar_begin)
+
+        instrText = OxmlElement('w:instrText')
+        instrText.text = 'PAGE' 
+        run._element.append(instrText)
+        
+        fldChar_end = OxmlElement('w:fldChar')
+        fldChar_end.set(qn('w:fldCharType'), 'end')
+        run._element.append(fldChar_end)
+        
+        # Define a fonte e tamanho do rodapé
+        for r in p.runs:
+            r.font.name = FONT_NAME
+            r.font.size = Pt(10)
+            
 def add_cover(doc: Document, title: str, author: str, cover_image_url: Optional[str]):
     """Cria a capa simples com imagem, título e autor."""
     
@@ -295,39 +315,6 @@ def add_cover(doc: Document, title: str, author: str, cover_image_url: Optional[
     run_author.font.name = FONT_NAME
     
     doc.add_page_break()
-    
-def add_page_numbers(doc: Document):
-    """Adiciona numeração de página (Campo PAGE) no rodapé."""
-    
-    for section in doc.sections:
-        footer = section.footer
-        
-        # Limpa o rodapé atual para garantir que não haja texto duplicado
-        for p in list(footer.paragraphs):
-            footer._element.remove(p._element)
-
-        p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-
-        # Campo para o número da página (PAGE)
-        run = p.add_run()
-        
-        fldChar_begin = OxmlElement('w:fldChar')
-        fldChar_begin.set(qn('w:fldCharType'), 'begin')
-        run._element.append(fldChar_begin)
-
-        instrText = OxmlElement('w:instrText')
-        instrText.text = 'PAGE' 
-        run._element.append(instrText)
-        
-        fldChar_end = OxmlElement('w:fldChar')
-        fldChar_end.set(qn('w:fldCharType'), 'end')
-        run._element.append(fldChar_end)
-        
-        # Define a fonte e tamanho do rodapé
-        for r in p.runs:
-            r.font.name = FONT_NAME
-            r.font.size = Pt(10)
 
 def create_and_process_document(
     processed_state: Dict, 
@@ -415,28 +402,26 @@ def create_and_process_document(
 
 # --- INTERFACE STREAMLIT PRINCIPAL ---
 
-st.set_page_config(layout="wide", page_title="Assistente de Publicação Azure")
+st.set_page_config(layout="wide", page_title="Assistente de Publicação OpenAI")
 
-st.title("📚 Assistente de Formatação e Publicação (Azure)")
-st.caption("Ferramenta que usa o Azure OpenAI Service para geração de texto e automatiza o Sumário e Numeração do DOCX.")
+st.title("📚 Assistente de Formatação e Publicação (OpenAI)")
+st.caption("Ferramenta que usa a OpenAI para geração de texto e automatiza o Sumário e Numeração do DOCX.")
 
 # --- SIDEBAR: CONFIGURAÇÕES, METADADOS E CHAVES ---
 
 with st.sidebar:
-    st.header("🔑 Configuração Azure OpenAI")
+    st.header("🔑 Configuração OpenAI")
     
-    # Campos específicos do Azure
-    azure_endpoint = st.text_input("1. Endpoint do Azure (URL Completa)", value=os.environ.get("AZURE_OPENAI_ENDPOINT", ""))
-    azure_key = st.text_input("2. Chave de Acesso do Azure", type="password", value=os.environ.get("AZURE_OPENAI_KEY", ""))
-    azure_deployment = st.text_input("3. Nome do Deployment (Modelo)", value=os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4o-mini-deployment"))
+    # Campo para chave OpenAI padrão
+    openai_key = st.text_input("1. Chave de Acesso da OpenAI", type="password", value=os.environ.get("OPENAI_API_KEY", ""))
     
-    # Inicializa o cliente na sessão usando os parâmetros do Azure
-    st.session_state['openai_client'] = get_client(azure_endpoint, azure_key, azure_deployment)
+    # Inicializa o cliente na sessão usando a chave OpenAI
+    st.session_state['openai_client'] = get_client(openai_key)
     
     if st.session_state['openai_client']:
-        st.success("Configuração do Azure OK. Funções de IA ativas.")
+        st.success("Configuração da OpenAI OK. Funções de IA ativas.")
     else:
-        st.warning("Insira o Endpoint, Chave e Deployment do Azure para habilitar a geração de texto.")
+        st.warning("Insira sua Chave de Acesso da OpenAI para habilitar a geração de texto.")
 
     st.divider()
 
@@ -507,7 +492,7 @@ with tab_content:
     st.markdown("---")
     
     # ----------------------------------------------------
-    st.subheader("Opção B: Escrever/Continuar com IA (Azure)")
+    st.subheader("Opção B: Escrever/Continuar com IA (OpenAI)")
     
     current_chapters = st.session_state['processed_state'].get('chapters', [])
     last_chapter_content = current_chapters[-1]['content'] if current_chapters else ""
@@ -548,7 +533,7 @@ with tab_content:
             else:
                 st.error(generated_content) # Exibe a mensagem de erro detalhada
         else:
-            st.error("Cliente Azure não configurado.")
+            st.error("Cliente OpenAI não configurado.")
             
     st.markdown("---")
     st.subheader("Edição do Manuscrito")
@@ -592,11 +577,11 @@ with tab_elements:
             st.warning("Insira uma URL de imagem de alta resolução para a capa.")
             
         if st.session_state['openai_client']:
-            cover_prompt = st.text_area("Prompt para Geração de Capa (DALL-E no Azure)", 
+            cover_prompt = st.text_area("Prompt para Geração de Capa (DALL-E)", 
                                         value=f"Capa de livro profissional para {st.session_state['book_title']} no gênero {st.session_state['book_genre']}.", height=100)
-            if st.button("🎨 Simular Geração de Capa (Azure)", key='generate_cover'):
-                # Simulação da URL de capa, pois a chamada real depende de um deployment de DALL-E no Azure
-                st.session_state['generated_image_url'] = f"https://placehold.co/600x900/4F46E5/FFFFFF/png?text={st.session_state['book_title'].replace(' ', '+')}"
+            if st.button("🎨 Simular Geração de Capa (DALL-E)", key='generate_cover'):
+                # Simulação da URL de capa, a chamada real usaria client.images.generate
+                st.session_state['generated_image_url'] = f"https://placehold.co/600x900/000000/FFFFFF/png?text={st.session_state['book_title'].replace(' ', '+')}"
                 st.success("Simulação de URL de Capa gerada!")
                 st.rerun()
 
@@ -667,5 +652,7 @@ with tab_download:
         )
         
         st.info("""
-        **Documento Pronto para Publicação!** O arquivo DOCX foi gerado com **formatação automática de Miolo de Livro (margens KDP/Gráfica e Fonte Arial 12)**. Ao abri-lo no Word, o **Sumário** e a **Numeração de Página** serão atualizados **instantaneamente**, sem a necessidade de nenhuma ação manual.
+        **Documento Pronto para Publicação!** O arquivo DOCX foi gerado com **formatação automática de Miolo de Livro (margens KDP/Gráfica e Fonte Arial 12)**. 
+        
+        Graças à automação no código, ao abrir o Word, o **Sumário** e a **Numeração de Página** serão atualizados **automaticamente**, sem a necessidade de nenhuma ação manual.
         """)
