@@ -5,14 +5,15 @@ from docx import Document
 from io import BytesIO
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-import requests # Para baixar a imagem da URL
+import requests 
 from docx.enum.style import WD_STYLE_TYPE
-import time # Para implementar o backoff em caso de Rate Limit
+import time 
+from typing import Optional, Dict
 
 # --- CONFIGURAÇÃO DE CONSTANTES ---
 
 # 1. DICIONÁRIO DE TAMANHOS KDP/GRÁFICA (Miolo)
-KDP_SIZES = {
+KDP_SIZES: Dict[str, Dict] = {
     "Padrão EUA (6x9 in)": {"name": "6 x 9 in", "width_in": 6.0, "height_in": 9.0, "width_cm": 15.24, "height_cm": 22.86, "papel_fator": 0.00115}, # Papel 50lb / 80gsm
     "Padrão A5 (5.83x8.27 in)": {"name": "A5 (14.8 x 21 cm)", "width_in": 5.83, "height_in": 8.27, "width_cm": 14.8, "height_cm": 21.0, "papel_fator": 0.00115},
     "Pocket (5x8 in)": {"name": "5 x 8 in", "width_in": 5.0, "height_in": 8.0, "width_cm": 12.7, "height_cm": 20.32, "papel_fator": 0.00115},
@@ -20,7 +21,7 @@ KDP_SIZES = {
 }
 
 # 2. TEMPLATES DE ESTILO DE DIAGRAMAÇÃO (Ficção e Acadêmico)
-STYLE_TEMPLATES = {
+STYLE_TEMPLATES: Dict[str, Dict] = {
     "Romance Clássico (Garamond)": {"font_name": "Garamond", "font_size_pt": 11, "line_spacing": 1.15, "indent": 0.5},
     "Thriller Moderno (Droid Serif)": {"font_name": "Droid Serif", "font_size_pt": 10, "line_spacing": 1.05, "indent": 0.3},
     "Acadêmico/ABNT (Times New Roman 12)": {"font_name": "Times New Roman", "font_size_pt": 12, "line_spacing": 1.5, "indent": 0.0},
@@ -37,27 +38,33 @@ st.title("🚀 Editor Pro IA: Publicação Sem Complicações")
 st.subheader("Transforme seu manuscrito em um livro profissional, pronto para ABNT e KDP.")
 
 # Variáveis globais para rastrear o status da API
-client = None
-API_KEY = None
-PROJECT_ID = None
-is_api_ready = False # Inicializa como False
+client: Optional[OpenAI] = None
+API_KEY: Optional[str] = None
+PROJECT_ID: Optional[str] = None
+is_api_ready: bool = False # Inicializa como False
 
 try:
-    # Tenta carregar as chaves do Streamlit Secrets
+    # 1. Tenta carregar as chaves do Streamlit Secrets ou Ambiente (Melhor Prática)
     if hasattr(st, 'secrets'):
-         if API_KEY_NAME in st.secrets and PROJECT_ID_NAME in st.secrets:
-             API_KEY = st.secrets.get(API_KEY_NAME) 
-             PROJECT_ID = st.secrets.get(PROJECT_ID_NAME)
-    
+        API_KEY = st.secrets.get(API_KEY_NAME, os.environ.get(API_KEY_NAME))
+        PROJECT_ID = st.secrets.get(PROJECT_ID_NAME, os.environ.get(PROJECT_ID_NAME))
+    else:
+        API_KEY = os.environ.get(API_KEY_NAME)
+        PROJECT_ID = os.environ.get(PROJECT_ID_NAME)
+
+    # 2. Se as chaves estiverem presentes, inicializa o cliente
     if API_KEY and PROJECT_ID:
         client = OpenAI(api_key=API_KEY, project=PROJECT_ID)
-        is_api_ready = True # Define como True se o cliente for inicializado
+        is_api_ready = True 
     
     if not is_api_ready:
-        st.warning(f"Chave e ID do Projeto OpenAI não configurados. A revisão e a geração de capa **NÃO** funcionarão. Por favor, adicione '{API_KEY_NAME}' e '{PROJECT_ID_NAME}' no Streamlit Secrets.")
+        st.warning(f"Chave e ID do Projeto OpenAI não configurados. A revisão e a geração de capa **NÃO** funcionarão. Por favor, adicione '{API_KEY_NAME}' e '{PROJECT_ID_NAME}' no Streamlit Secrets ou variáveis de ambiente.")
+        
+    if is_api_ready:
+         st.sidebar.success("✅ Conexão OpenAI Pronta!")
 
 except Exception as e:
-    st.error(f"Erro na inicialização do ambiente (secrets). Detalhes: {e}")
+    st.error(f"Erro na inicialização do ambiente (secrets/env). Detalhes: {e}")
     client = None
     is_api_ready = False
 
@@ -67,7 +74,9 @@ except Exception as e:
 def call_openai_api(system_prompt: str, user_content: str, max_tokens: int = 3000, retries: int = 3) -> str:
     """Função genérica para chamar a API da OpenAI com backoff exponencial."""
     
-    if not is_api_ready:
+    global client, is_api_ready
+
+    if not is_api_ready or client is None:
         return "[ERRO DE CONEXÃO DA API] Chaves OPENAI_API_KEY e/ou OPENAI_PROJECT_ID não configuradas. Verifique Streamlit Secrets."
 
     for i in range(retries):
@@ -89,8 +98,8 @@ def call_openai_api(system_prompt: str, user_content: str, max_tokens: int = 300
                  st.error(f"ERRO DE AUTENTICAÇÃO: Sua chave de API está incorreta ou expirada. Detalhes: {error_msg}")
                  return "[ERRO DE CONEXÃO DA API] Chave de API Inválida."
 
-            elif "Rate limit reached" in error_msg or "Error code: 429" in error_msg and i < retries - 1:
-                wait_time = 2 ** i
+            elif ("Rate limit reached" in error_msg or "Error code: 429" in error_msg) and i < retries - 1:
+                wait_time = 2 ** i # Backoff exponencial (1s, 2s, 4s...)
                 st.warning(f"Limite de taxa atingido. Tentando novamente em {wait_time} segundos... (Tentativa {i+1}/{retries})")
                 time.sleep(wait_time)
             else:
@@ -103,8 +112,9 @@ def call_openai_api(system_prompt: str, user_content: str, max_tokens: int = 300
 def revisar_paragrafo(paragrafo_texto: str) -> str:
     """Revisão de um único parágrafo."""
     if not paragrafo_texto.strip(): return "" 
-    system_prompt = "Você é um editor literário de nível sênior. Sua tarefa é revisar, editar e aprimorar o parágrafo. Corrija gramática, aprimore o estilo e garanta a coerência. Retorne *apenas* o parágrafo revisado, sem comentários."
-    user_content = f"Parágrafo a ser editado:\n---\n{paragrafo_texto}\n---"
+    # Prompt mais curto para otimizar o tempo e custo do gpt-4o-mini
+    system_prompt = "Você é um editor literário. Revise, edite e aprimore o parágrafo. Corrija gramática, aprimore o estilo e garanta a coerência. Retorne *apenas* o parágrafo revisado, sem comentários."
+    user_content = f"Parágrafo a ser editado: {paragrafo_texto}"
     texto_revisado = call_openai_api(system_prompt, user_content, max_tokens=500)
     if "[ERRO DE CONEXÃO DA API]" in texto_revisado:
         return paragrafo_texto
@@ -112,46 +122,32 @@ def revisar_paragrafo(paragrafo_texto: str) -> str:
 
 def gerar_conteudo_marketing(titulo: str, autor: str, texto_completo: str) -> str:
     """Gera o blurb para contracapa e sugestões de arte."""
-    system_prompt = """
-    Você é um Copywriter de Best-sellers. Sua tarefa é criar um blurb de contracapa envolvente.
-    Gere o resultado *APENAS* com o texto do blurb, sem títulos ou formatação extra.
-    """
+    system_prompt = "Você é um Copywriter de Best-sellers. Sua tarefa é criar um blurb de contracapa envolvente (3-4 parágrafos). Gere o resultado *APENAS* com o texto do blurb, sem títulos."
     user_content = f"Crie um blurb de contracapa de 3-4 parágrafos para este livro: Título: {titulo}, Autor: {autor}. Amostra: {texto_completo[:5000]}"
     return call_openai_api(system_prompt, user_content, max_tokens=1000)
 
 def gerar_relatorio_estrutural(texto_completo: str) -> str:
     """Analisa o texto completo para dar feedback estrutural."""
     system_prompt = "Você é um Editor-Chefe. Gere um breve Relatório de Revisão para o autor. Foque em: Ritmo da Narrativa, Desenvolvimento de Personagens e Estrutura Geral. Use títulos e bullet points."
-    user_content = f"MANUSCRITO PARA ANÁLISE:\n---\n{texto_completo[:15000]}\n---"
+    user_content = f"MANUSCRITO PARA ANÁLISE (Amostra): {texto_completo[:15000]}"
     return call_openai_api(system_prompt, user_content)
 
 def gerar_elementos_pre_textuais(titulo: str, autor: str, ano: int, texto_completo: str) -> str:
     """Gera o texto de Copyright e a bio para a página Sobre o Autor."""
     system_prompt = """
-    Você é um gerente de editora. Gere o conteúdo essencial de abertura e fechamento para um livro (Ficção/Não-Ficção).
-    Use os dados fornecidos e o tom do manuscrito para criar uma bio atraente.
+    Você é um gerente de editora. Gere o conteúdo essencial de abertura e fechamento para um livro.
+    Gere o resultado no formato estrito:
+    ### 1. Página de Copyright e Créditos
+    [Texto de Copyright e Créditos (inclua ano 2025)]
+    ### 2. Página 'Sobre o Autor'
+    [Bio envolvente de 2-3 parágrafos, formatada para uma página de livro.]
     """
     user_content = f"""
-    Título: {titulo}
-    Autor: {autor}
-    Ano: {ano}
-    Manuscrito (Amostra): {texto_completo[:5000]}
-    
-    Gere o resultado no formato estrito:
-    
-    ### 1. Página de Copyright e Créditos
-    
-    [Informações sobre Copyright (Ex: Direitos Autorais 2025, Carlos Honorato. Todos os direitos reservados. Proibida a reprodução.)]
-    [Informações de Publicação (Ex: Primeira Edição, E-book/Impresso, 2025)]
-    [Aviso Legal padrão]
-    
-    ### 2. Página 'Sobre o Autor'
-    
-    [Bio envolvente de 2-3 parágrafos, formatada para uma página de livro.]
+    Título: {titulo}, Autor: {autor}, Ano: {ano}. Analise o tom do manuscrito (Amostra): {texto_completo[:5000]}
     """
     return call_openai_api(system_prompt, user_content)
 
-def gerar_relatorio_conformidade_kdp(titulo: str, autor: str, page_count: int, format_data: dict, espessura_cm: float, capa_largura_total_cm: float, capa_altura_total_cm: float) -> str:
+def gerar_relatorio_conformidade_kdp(titulo: str, autor: str, page_count: int, format_data: Dict, espessura_cm: float, capa_largura_total_cm: float, capa_altura_total_cm: float) -> str:
     """Gera um checklist de conformidade técnica para upload na Amazon KDP."""
     tamanho_corte = format_data['name']
     prompt_kdp = f"""
@@ -176,7 +172,7 @@ def gerar_relatorio_conformidade_kdp(titulo: str, autor: str, page_count: int, f
 
 # --- FUNÇÕES DOCX AVANÇADAS ---
 
-def adicionar_pagina_rosto(documento: Document, titulo: str, autor: str, style_data: dict):
+def adicionar_pagina_rosto(documento: Document, titulo: str, autor: str, style_data: Dict):
     """Adiciona uma página de rosto formatada."""
     font_name = style_data['font_name']
     
@@ -185,7 +181,7 @@ def adicionar_pagina_rosto(documento: Document, titulo: str, autor: str, style_d
     p_title = documento.add_paragraph()
     p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_title.add_run(titulo).bold = True
-    p_title.runs[0].font.size = Pt(24) # Título maior
+    p_title.runs[0].font.size = Pt(24) 
     p_title.runs[0].font.name = font_name
     
     for _ in range(5):
@@ -200,7 +196,7 @@ def adicionar_pagina_rosto(documento: Document, titulo: str, autor: str, style_d
     documento.add_page_break()
 
 
-def adicionar_pagina_generica(documento: Document, titulo: str, subtitulo: str = None):
+def adicionar_pagina_generica(documento: Document, titulo: str, subtitulo: Optional[str] = None):
     """Adiciona uma página de título formatada e um placeholder."""
     documento.add_page_break()
     
@@ -233,7 +229,9 @@ def gerar_capa_ia_completa(prompt_visual: str, blurb: str, autor: str, titulo: s
     Chama a API DALL-E 3 para gerar a imagem da capa COMPLETA (Frente, Lombada e Verso).
     """
     
-    if not is_api_ready:
+    global client, is_api_ready
+
+    if not is_api_ready or client is None:
         return "[ERRO GERAÇÃO DE CAPA] Chaves OPENAI_API_KEY e/ou OPENAI_PROJECT_ID não configuradas. Verifique Streamlit Secrets."
         
     full_prompt = f"""
@@ -261,7 +259,7 @@ def gerar_capa_ia_completa(prompt_visual: str, blurb: str, autor: str, titulo: s
         return f"[ERRO GERAÇÃO DE CAPA] Falha ao gerar a imagem: {e}. Verifique se sua conta OpenAI tem créditos para DALL-E 3 e se o prompt não viola as diretrizes."
 
 # --- FUNÇÃO PRINCIPAL DE DIAGRAMAÇÃO E REVISÃO ---
-def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices_abnt, status_container): 
+def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, incluir_indices_abnt: bool, status_container): 
     
     global is_api_ready 
     
@@ -297,6 +295,7 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
     with status_container:
         st.info("Fase 1/3: Gerando conteúdo de Copyright e 'Sobre o Autor'...")
     
+    # Prepara amostra do manuscrito
     uploaded_file.seek(0)
     manuscript_sample = uploaded_file.getvalue().decode('utf-8', errors='ignore')[:5000]
 
@@ -318,6 +317,7 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
     
     # Página de Copyright
     try:
+        # Tenta extrair o texto de copyright
         copyright_text_full = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[0].strip() 
         copyright_text_full = copyright_text_full.replace("### 1. Página de Copyright e Créditos", "").strip() 
     except IndexError:
@@ -347,13 +347,16 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
         progress_text = "Revisando e diagramando o miolo... 0%"
         progress_bar = st.progress(0, text=progress_text)
     
+    # Variável para controlar a atualização de progresso (mitigação do erro removeChild)
+    update_interval = 10 
+
     for i, paragrafo in enumerate(paragrafos):
         texto_original = paragrafo.text
         texto_completo += texto_original + "\n"
         
         # --- CORREÇÃO DE ESTABILIDADE: Limita a atualização da barra de progresso ---
         # A barra só é atualizada a cada 10 parágrafos ou no final
-        if (i + 1) % 10 == 0 or i == total_paragrafos - 1:
+        if (i + 1) % update_interval == 0 or i == total_paragrafos - 1:
             percent_complete = int((i + 1) / total_paragrafos * 100)
             progress_bar.progress(percent_complete, text=f"Revisando e diagramando o miolo... {percent_complete}%")
 
@@ -368,7 +371,7 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
 
         novo_paragrafo = documento_revisado.add_paragraph(texto_revisado)
         
-        # Heurística para Títulos de Capítulo
+        # Heurística para Títulos de Capítulo (Marca como Heading 1 para Sumário Automático)
         if len(texto_original.strip()) > 0 and (
             texto_original.strip().lower().startswith("capítulo") or
             texto_original.strip().lower().startswith("introdução") or
@@ -391,6 +394,7 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
     # --- 6. Inserção da Página Pós-Textual ---
     documento_revisado.add_page_break()
     try:
+        # Tenta extrair o texto sobre o autor
         about_author_text_full = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[1].strip()
         about_author_text_full = about_author_text_full.replace("### 2. Página 'Sobre o Autor'", "").strip() # Remove o cabeçalho
     except IndexError:
@@ -439,7 +443,9 @@ format_option_default = "Padrão A5 (5.83x8.27 in)"
 selected_format_data_calc = KDP_SIZES.get(st.session_state.get('format_option', format_option_default), KDP_SIZES[format_option_default])
 
 espessura_cm = round(st.session_state['page_count'] * selected_format_data_calc['papel_fator'], 2) 
+# Largura total = Frente + Lombada + Verso
 capa_largura_total_cm = round((selected_format_data_calc['width_cm'] * 2) + espessura_cm, 2)
+# Altura total = Altura do corte + 0.6 cm de sangria (0.3cm em cima + 0.3cm embaixo)
 capa_altura_total_cm = round(selected_format_data_calc['height_cm'] + 0.6, 2)
 # --- FIM CÁLCULOS DINÂMICOS ---
 
@@ -532,13 +538,14 @@ with miolo_tab:
             selected_format_data = KDP_SIZES[st.session_state['format_option']]
             selected_style_data = STYLE_TEMPLATES[st.session_state.get('style_option', "Romance Clássico (Garamond)")] 
             
+            # Reseta o ponteiro do arquivo para o início antes de processar
             uploaded_file.seek(0)
             documento_revisado, texto_completo, blurb_gerado = processar_manuscrito(
                 uploaded_file, 
                 selected_format_data, 
                 selected_style_data, 
                 st.session_state['incluir_indices_abnt'], 
-                status_container # Passa o container seguro
+                status_container 
             )
             
             st.session_state['documento_revisado'] = documento_revisado
@@ -621,8 +628,10 @@ with export_tab:
         # --- Relatório Estrutural ---
         st.subheader("1. Relatório Estrutural (Editor-Chefe)")
         if is_api_ready:
+            # Condição para evitar re-gerar o relatório desnecessariamente
             if 'relatorio_estrutural' not in st.session_state or st.button("Gerar/Atualizar Relatório Estrutural"):
                  with st.spinner("Analisando ritmo e personagens..."):
+                    # Passa apenas uma amostra do texto completo para economizar tokens
                     relatorio = gerar_relatorio_estrutural(st.session_state['texto_completo'])
                     st.session_state['relatorio_estrutural'] = relatorio
             
