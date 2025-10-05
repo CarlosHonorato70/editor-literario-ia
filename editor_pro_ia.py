@@ -261,7 +261,6 @@ def gerar_capa_ia_completa(prompt_visual: str, blurb: str, autor: str, titulo: s
         return f"[ERRO GERAÇÃO DE CAPA] Falha ao gerar a imagem: {e}. Verifique se sua conta OpenAI tem créditos para DALL-E 3 e se o prompt não viola as diretrizes."
 
 # --- FUNÇÃO PRINCIPAL DE DIAGRAMAÇÃO E REVISÃO ---
-# O status_container agora é um st.container() seguro, em vez de st.empty()
 def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices_abnt, status_container): 
     
     global is_api_ready 
@@ -313,7 +312,6 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
         """
 
     # --- 4. Inserção de Elementos Pré-textuais no DOCX ---
-    # ... (Code to insert pages remains the same)
     
     # Página de Rosto (Título e Autor)
     adicionar_pagina_rosto(documento_revisado, st.session_state['book_title'], st.session_state['book_author'], style_data)
@@ -353,8 +351,11 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
         texto_original = paragrafo.text
         texto_completo += texto_original + "\n"
         
-        percent_complete = int((i + 1) / total_paragrafos * 100)
-        progress_bar.progress(percent_complete, text=f"Revisando e diagramando o miolo... {percent_complete}%")
+        # --- CORREÇÃO DE ESTABILIDADE: Limita a atualização da barra de progresso ---
+        # A barra só é atualizada a cada 10 parágrafos ou no final
+        if (i + 1) % 10 == 0 or i == total_paragrafos - 1:
+            percent_complete = int((i + 1) / total_paragrafos * 100)
+            progress_bar.progress(percent_complete, text=f"Revisando e diagramando o miolo... {percent_complete}%")
 
         if len(texto_original.strip()) < 10:
             documento_revisado.add_paragraph(texto_original)
