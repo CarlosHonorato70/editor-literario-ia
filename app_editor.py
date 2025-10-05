@@ -8,7 +8,8 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 import requests 
 from docx.enum.style import WD_STYLE_TYPE
 import time 
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple, Any
+import math 
 
 # --- CONFIGURAÇÃO DE CONSTANTES ---
 
@@ -59,6 +60,7 @@ try:
         is_api_ready = True 
     
     if not is_api_ready:
+        st.sidebar.error("❌ Conexão OpenAI Inativa.")
         st.warning(f"Chave e ID do Projeto OpenAI não configurados. A revisão e a geração de capa **NÃO** funcionarão. Por favor, adicione **'{API_KEY_NAME}'** e **'{PROJECT_ID_NAME}'** no Streamlit Secrets ou variáveis de ambiente.")
         
     if is_api_ready:
@@ -109,11 +111,34 @@ def call_openai_api(system_prompt: str, user_content: str, max_tokens: int = 300
                 
     return "[ERRO DE CONEXÃO DA API] Tentativas de conexão esgotadas devido a Rate Limit ou erro desconhecido."
 
+def run_fast_process_with_timer(message: str, func: callable, *args: Any, **kwargs: Any) -> Tuple[str, float]:
+    """
+    Função genérica para chamar a API com timer e spinner, retornando
+    o resultado e o tempo de duração.
+    """
+    start_time = time.time()
+    
+    # Usa st.spinner para exibir o cronômetro ascendente e a mensagem
+    with st.spinner(f"⏳ {message}..."):
+        result = func(*args, **kwargs)
+        
+    duration = round(time.time() - start_time, 1)
+    
+    if "[ERRO DE CONEXÃO DA API]" in str(result):
+        st.error(f"❌ {message} falhou em **{duration}s**. Verifique o log de erros.")
+        # Retorna o erro no resultado
+        return result, duration 
+    else:
+        # Se for bem-sucedido, exibe a duração
+        st.success(f"✅ {message} concluída em **{duration}s**.")
+        return result, duration
 
-def revisar_paragrafo(paragrafo_texto: str) -> str:
-    """Revisão de um único parágrafo."""
+# --- FUNÇÕES ESPECÍFICAS DA IA ---
+
+def revisar_paragrafo(paragrafo_texto: str, delay_s: float) -> str:
+    """Revisão de um único parágrafo, utilizando o delay ajustável."""
+    
     if not paragrafo_texto.strip(): return "" 
-    # Prompt mais curto para otimizar o tempo e custo do gpt-4o-mini
     system_prompt = "Você é um editor literário. Revise, edite e aprimore o parágrafo. Corrija gramática, aprimore o estilo e garanta a coerência. Retorne *apenas* o parágrafo revisado, sem comentários."
     user_content = f"Parágrafo a ser editado: {paragrafo_texto}"
     texto_revisado = call_openai_api(system_prompt, user_content, max_tokens=500)
@@ -121,8 +146,8 @@ def revisar_paragrafo(paragrafo_texto: str) -> str:
     if "[ERRO DE CONEXÃO DA API]" in texto_revisado:
         return paragrafo_texto
     
-    # *** CORREÇÃO DE ESTABILIDADE FINAL: Atraso de 0.3 segundos (para contas pagas) para evitar picos de Rate Limit (cerca de 200 RPM) ***
-    time.sleep(0.3) 
+    # Atraso ajustável pelo usuário
+    time.sleep(delay_s) 
     
     return texto_revisado
 
@@ -177,7 +202,42 @@ def gerar_relatorio_conformidade_kdp(titulo: str, autor: str, page_count: int, f
     return call_openai_api("Você é um especialista em publicação KDP.", prompt_kdp)
 
 
-# --- FUNÇÕES DOCX AVANÇADAS ---
+# --- FUNÇÃO DE GERAÇÃO DE CAPA COMPLETA ---
+def gerar_capa_ia_completa(prompt_visual: str, blurb: str, autor: str, titulo: str, largura_cm: float, altura_cm: float, espessura_cm: float) -> str:
+    """
+    Chama a API DALL-E 3 para gerar a imagem da capa COMPLETA (Frente, Lombada e Verso).
+    """
+    
+    global client, is_api_ready
+
+    if not is_api_ready or client is None:
+        return "[ERRO GERAÇÃO DE CAPA] Chaves OPENAI_API_KEY e/ou OPENAI_PROJECT_ID não configuradas. Verifique Streamlit Secrets."
+        
+    full_prompt = f"""
+    Crie uma imagem de CAPA COMPLETA E ÚNICA para impressão, com texto. As dimensões físicas totais (largura x altura) são: {largura_cm} cm x {altura_cm} cm. A lombada tem {espessura_cm} cm de espessura, localizada no centro.
+
+    O design deve seguir o estilo: "{prompt_visual}".
+    A arte DEVE incluir:
+    1. Título '{titulo}' e Autor '{autor}' na capa (Frente).
+    2. Título e Autor CLARAMENTE visíveis e centralizados na LOMBADA.
+    3. O Blurb de vendas (texto do verso) na CONTRACAPA. Texto: "{blurb[:500]}..." (Use o máximo do texto possível, estilizado).
+    4. Crie uma composição coesa que se estenda pela frente, lombada e verso. O design deve ser profissional e pronto para impressão.
+    """
+
+    try:
+        response = client.images.generate(
+            model="dall-e-3",
+            prompt=full_prompt,
+            size="1792x1024", # Melhor proporção para capa completa (Horizontal)
+            quality="hd", 
+            n=1 
+        )
+        image_url = response.data[0].url
+        return image_url
+    except Exception as e:
+        return f"[ERRO GERAÇÃO DE CAPA] Falha ao gerar a imagem: {e}. Verifique se sua conta OpenAI tem créditos para DALL-E 3 e se o prompt não viola as diretrizes."
+
+# --- FUNÇÕES DOCX AVANÇADAS (mantidas) ---
 
 def adicionar_pagina_rosto(documento: Document, titulo: str, autor: str, style_data: Dict):
     """Adiciona uma página de rosto formatada."""
@@ -230,43 +290,8 @@ def adicionar_pagina_generica(documento: Document, titulo: str, subtitulo: Optio
     documento.add_page_break()
 
 
-# --- FUNÇÃO DE GERAÇÃO DE CAPA COMPLETA ---
-def gerar_capa_ia_completa(prompt_visual: str, blurb: str, autor: str, titulo: str, largura_cm: float, altura_cm: float, espessura_cm: float) -> str:
-    """
-    Chama a API DALL-E 3 para gerar a imagem da capa COMPLETA (Frente, Lombada e Verso).
-    """
-    
-    global client, is_api_ready
-
-    if not is_api_ready or client is None:
-        return "[ERRO GERAÇÃO DE CAPA] Chaves OPENAI_API_KEY e/ou OPENAI_PROJECT_ID não configuradas. Verifique Streamlit Secrets."
-        
-    full_prompt = f"""
-    Crie uma imagem de CAPA COMPLETA E ÚNICA para impressão, com texto. As dimensões físicas totais (largura x altura) são: {largura_cm} cm x {altura_cm} cm. A lombada tem {espessura_cm} cm de espessura, localizada no centro.
-
-    O design deve seguir o estilo: "{prompt_visual}".
-    A arte DEVE incluir:
-    1. Título '{titulo}' e Autor '{autor}' na capa (Frente).
-    2. Título e Autor CLARAMENTE visíveis e centralizados na LOMBADA.
-    3. O Blurb de vendas (texto do verso) na CONTRACAPA. Texto: "{blurb[:500]}..." (Use o máximo do texto possível, estilizado).
-    4. Crie uma composição coesa que se estenda pela frente, lombada e verso. O design deve ser profissional e pronto para impressão.
-    """
-
-    try:
-        response = client.images.generate(
-            model="dall-e-3",
-            prompt=full_prompt,
-            size="1792x1024", # Melhor proporção para capa completa (Horizontal)
-            quality="hd", 
-            n=1 
-        )
-        image_url = response.data[0].url
-        return image_url
-    except Exception as e:
-        return f"[ERRO GERAÇÃO DE CAPA] Falha ao gerar a imagem: {e}. Verifique se sua conta OpenAI tem créditos para DALL-E 3 e se o prompt não viola as diretrizes."
-
 # --- FUNÇÃO PRINCIPAL DE DIAGRAMAÇÃO E REVISÃO ---
-def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, incluir_indices_abnt: bool, status_container): 
+def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, incluir_indices_abnt: bool, status_container, time_rate_s: float): 
     
     global is_api_ready 
     
@@ -276,17 +301,15 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
     documento_original = Document(uploaded_file)
     documento_revisado = Document()
     
-    # --- 1. Configuração de Layout (Tamanho de Corte) ---
+    # --- 1. Configuração de Layout e Estilo (Mantido) ---
     section = documento_revisado.sections[0]
     section.page_width = Inches(format_data['width_in'])
     section.page_height = Inches(format_data['height_in'])
-    # Margens ajustadas para KDP (Ex: 1.0 polegadas no lado da lombada para mais de 150 páginas)
     section.left_margin = Inches(1.0) 
     section.right_margin = Inches(0.6) 
     section.top_margin = Inches(0.8)
     section.bottom_margin = Inches(0.8)
-
-    # --- 2. Configuração de Estilo Profissional ---
+    
     font_name = style_data['font_name']
     font_size_pt = style_data['font_size_pt']
     line_spacing = style_data['line_spacing']
@@ -299,18 +322,25 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
     paragraph_format.line_spacing = line_spacing 
     paragraph_format.first_line_indent = Inches(indent_in) 
     
-    # --- 3. Geração dos Elementos Pré-textuais ---
-    with status_container:
-        st.info("Fase 1/3: Gerando conteúdo de Copyright e 'Sobre o Autor'...")
+    # --- 2. Geração dos Elementos Pré-textuais (Fase 1) ---
     
     # Prepara amostra do manuscrito
     uploaded_file.seek(0)
-    # Lendo apenas uma amostra segura
     manuscript_sample = uploaded_file.getvalue().decode('utf-8', errors='ignore')[:5000]
 
+    with status_container:
+        st.subheader("Fase 1/3: Geração de Elementos Pré-textuais")
+        
     if is_api_ready:
-        time.sleep(0.3) 
-        pre_text_content = gerar_elementos_pre_textuais(st.session_state['book_title'], st.session_state['book_author'], 2025, manuscript_sample)
+        # Usa o novo wrapper de tempo
+        pre_text_content, duration = run_fast_process_with_timer(
+            "Geração de Elementos Pré-textuais (Copyright e Bio)",
+            gerar_elementos_pre_textuais, 
+            st.session_state['book_title'], 
+            st.session_state['book_author'], 
+            2025, 
+            manuscript_sample
+        )
     else:
         pre_text_content = """
         ### 1. Página de Copyright e Créditos
@@ -319,15 +349,17 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
         ### 2. Página 'Sobre o Autor'
         [Conteúdo sobre o Autor Padrão: Edite após o download. A IA não está conectada para gerar a bio envolvente.]
         """
+        # Exibe status de pular a fase se a API não estiver pronta
+        with status_container:
+            st.warning("⚠️ Elementos Pré-textuais pulados: Conexão OpenAI inativa.")
 
-    # --- 4. Inserção de Elementos Pré-textuais no DOCX ---
+    # --- 3. Inserção de Elementos Pré-textuais no DOCX (Mantido) ---
     
     # Página de Rosto (Título e Autor)
     adicionar_pagina_rosto(documento_revisado, st.session_state['book_title'], st.session_state['book_author'], style_data)
     
     # Página de Copyright
     try:
-        # Tenta extrair o texto de copyright
         copyright_text_full = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[0].strip() 
         copyright_text_full = copyright_text_full.replace("### 1. Página de Copyright e Créditos", "").strip() 
     except IndexError:
@@ -349,49 +381,69 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
         adicionar_pagina_generica(documento_revisado, "Índice de Tabelas", "Placeholder para Tabelas")
         adicionar_pagina_generica(documento_revisado, "Índice de Ilustrações", "Placeholder para Ilustrações")
 
-    # --- 5. Processamento do Miolo (Revisão Parágrafo a Parágrafo) ---
+    # --- 4. Processamento do Miolo (Fase 2 - Revisão Parágrafo a Parágrafo) ---
     
     paragrafos = documento_original.paragraphs
+    paragrafos_para_revisar = [p for p in paragrafos if len(p.text.strip()) >= 10]
+    
     total_paragrafos = len(paragrafos)
     texto_completo = ""
+    revisados_count = 0
+
+    # LÓGICA DE TEMPORIZADOR PARA ESTIMATIVA INICIAL E CONTAGEM REGRESSIVA
+    total_a_revisar = len(paragrafos_para_revisar)
+    # Estimativa de tempo total (taxa de atraso ajustável + buffer realista de 3.0s/chamada)
+    estimated_total_time_s = total_a_revisar * (time_rate_s + 3.0) 
+    
+    estimated_minutes = int(estimated_total_time_s // 60)
+    estimated_seconds = int(estimated_total_time_s % 60)
+    
+    time_estimate_message = f"**Taxa de Atraso:** {time_rate_s}s | **Estimativa Inicial:** Cerca de **{estimated_minutes}m {estimated_seconds}s** para revisar **{total_a_revisar}** parágrafos."
     
     # MUITO IMPORTANTE: Define a barra de progresso dentro do container
     with status_container:
-        progress_text = "Revisando e diagramando o miolo... 0%"
-        progress_bar = st.progress(0, text=progress_text)
+        st.subheader("Fase 2/3: Revisão e Diagramação do Miolo")
+        if is_api_ready:
+            st.info(time_estimate_message) # Exibe a estimativa inicial
+        else:
+            st.warning("Revisão IA Desativada. Apenas diagramação será executada.")
+            
+        # Template focado no Tempo Restante (Contagem Regressiva)
+        progress_text_template = "⏳ **Tempo Restante:** {remaining_time} | Progresso: {percent}% ({done}/{total})"
+        
+        progress_bar = st.progress(0, text=progress_text_template.format(
+            percent=0, 
+            done=0, 
+            total=total_a_revisar, 
+            remaining_time=f"{estimated_minutes}m {estimated_seconds}s" # Exibe a estimativa inicial
+        ))
+        start_loop_time = time.time() # Inicia o timer do loop
     
-    # Variável para controlar a atualização de progresso (mitigação do erro removeChild)
-    update_interval = 10 
+    update_interval = max(1, total_a_revisar // 50) # Atualiza no máximo 50 vezes ou a cada 1 parágrafo
 
     for i, paragrafo in enumerate(paragrafos):
         texto_original = paragrafo.text
         texto_completo += texto_original + "\n"
         
-        # --- CORREÇÃO DE ESTABILIDADE: Limita a atualização da barra de progresso ---
-        if (i + 1) % update_interval == 0 or i == total_paragrafos - 1:
-            percent_complete = int((i + 1) / total_paragrafos * 100)
-            # Nota: O aviso sobre o tempo de espera é importante para o usuário
-            progress_bar.progress(percent_complete, text=f"Revisando e diagramando o miolo... {percent_complete}% (Revisão IA: Aproximadamente 0.3s/parágrafo)")
+        is_revisable = len(texto_original.strip()) >= 10
 
-        if len(texto_original.strip()) < 10:
-            documento_revisado.add_paragraph(texto_original)
-            continue 
-
-        if is_api_ready:
-            texto_revisado = revisar_paragrafo(texto_original)
+        if is_revisable and is_api_ready:
+            # Passa o delay ajustável
+            texto_revisado = revisar_paragrafo(texto_original, time_rate_s)
+            revisados_count += 1
         else:
-            texto_revisado = texto_original # Pula a revisão
-
+            texto_revisado = texto_original
+        
+        # Cria o novo parágrafo no documento (Mantido)
         novo_paragrafo = documento_revisado.add_paragraph(texto_revisado)
         
-        # Heurística para Títulos de Capítulo (Marca como Heading 1 para Sumário Automático)
+        # Lógica de títulos e quebras (Mantida)
         if len(texto_original.strip()) > 0 and (
             texto_original.strip().lower().startswith("capítulo") or
             texto_original.strip().lower().startswith("introdução") or
             texto_original.strip().lower().startswith("prólogo") or
             texto_original.strip().lower().startswith("conclusão")
         ):
-            # Adiciona quebra de página antes do título, exceto no primeiro capítulo
             if i > 0:
                 documento_revisado.add_page_break()
                 
@@ -399,26 +451,59 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
             novo_paragrafo.alignment = WD_ALIGN_PARAGRAPH.CENTER
             novo_paragrafo.runs[0].font.size = Pt(18) 
             novo_paragrafo.runs[0].font.name = font_name
-            documento_revisado.add_paragraph("") # Espaço pós-título
+            documento_revisado.add_paragraph("") 
         else:
             novo_paragrafo.style = 'Normal'
-    
-    # Após o loop, limpa a barra de progresso e mostra o sucesso.
-    with status_container:
-        progress_bar.empty()
-        st.success("Fase 2/3: Revisão e diagramação do miolo concluída! 🎉")
 
-    # --- 6. Inserção da Página Pós-Textual ---
+        # --- LÓGICA DE ATUALIZAÇÃO DO PROGRESSO COM TEMPO (CRONÔMETRO) ---
+        if is_revisable and is_api_ready and (revisados_count % update_interval == 0 or revisados_count == total_a_revisar):
+            percent_complete = int(revisados_count / total_a_revisar * 100)
+            elapsed_time = time.time() - start_loop_time
+            
+            # Cálculo do tempo restante baseado na taxa de conclusão até agora
+            if elapsed_time > 0 and revisados_count > 0:
+                avg_time_per_revised = elapsed_time / revisados_count
+                remaining_revised = total_a_revisar - revisados_count
+                remaining_time_s = remaining_revised * avg_time_per_revised
+                
+                remaining_minutes = int(remaining_time_s // 60)
+                remaining_seconds = int(remaining_time_s % 60)
+                
+                # Garante que o tempo restante não é negativo
+                if remaining_time_s < 0:
+                     remaining_time_str = "Concluindo..."
+                else:
+                    remaining_time_str = f"{remaining_minutes}m {remaining_seconds}s"
+            else:
+                remaining_time_str = "Calculando..."
+
+            progress_bar.progress(
+                percent_complete, 
+                text=progress_text_template.format(
+                    percent=percent_complete, 
+                    done=revisados_count, 
+                    total=total_a_revisar, 
+                    remaining_time=remaining_time_str
+                )
+            )
+
+    # Após o loop, limpa a barra de progresso e mostra o sucesso.
+    end_loop_time = time.time()
+    total_loop_duration = round(end_loop_time - start_loop_time, 1)
+
+    with status_container:
+        progress_bar.empty() # Limpa a barra
+        st.success(f"Fase 2/3 concluída: Miolo revisado e diagramado em **{total_loop_duration}s**! 🎉")
+
+    # --- 5. Inserção da Página Pós-Textual (Mantido) ---
     documento_revisado.add_page_break()
     try:
-        # Tenta extrair o texto sobre o autor
         about_author_text_full = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[1].strip()
-        about_author_text_full = about_author_text_full.replace("### 2. Página 'Sobre o Autor'", "").strip() # Remove o cabeçalho
+        about_author_text_full = about_author_text_full.replace("### 2. Página 'Sobre o Autor'", "").strip() 
     except IndexError:
         about_author_text_full = "[Erro ao extrair a bio do Autor. Verifique a conexão da API.]"
     
     adicionar_pagina_generica(documento_revisado, "Sobre o Autor", "Sua biografia gerada pela IA")
-    # A bio pode ter múltiplas linhas, então adicionamos por parágrafo
     for line in about_author_text_full.split('\n'):
         if line.strip():
             documento_revisado.add_paragraph(line.strip(), style='Normal')
@@ -428,22 +513,27 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
         adicionar_pagina_generica(documento_revisado, "Apêndice A", "Título do Apêndice")
         adicionar_pagina_generica(documento_revisado, "Anexo I", "Título do Anexo")
 
-    # --- 7. Geração do Blurb de Marketing (para uso na próxima tab) ---
+    # --- 6. Geração do Blurb de Marketing (Fase 3) ---
     with status_container:
-        st.info("Fase 3/3: Gerando Blurb de Marketing e preparando para análise...")
-    
+        st.subheader("Fase 3/3: Geração de Elementos de Marketing")
+
     if is_api_ready:
-        time.sleep(0.3) # Mais um atraso para geração do blurb
-        blurb_gerado = gerar_conteudo_marketing(st.session_state['book_title'], st.session_state['book_author'], texto_completo)
+        # Usa o novo wrapper de tempo
+        blurb_gerado, duration = run_fast_process_with_timer(
+            "Geração do Blurb de Marketing (Contracapa)",
+            gerar_conteudo_marketing,
+            st.session_state['book_title'], 
+            st.session_state['book_author'], 
+            texto_completo
+        )
     else:
         blurb_gerado = "[Blurb não gerado. Conecte a API para um texto de vendas profissional.]"
-
-    with status_container:
-        st.empty() # Limpa a última mensagem de status
+        with status_container:
+            st.warning("⚠️ Blurb de Marketing pulado: Conexão OpenAI inativa.")
         
     return documento_revisado, texto_completo, blurb_gerado
 
-# --- INICIALIZAÇÃO DE ESTADO ---
+# --- INICIALIZAÇÃO DE ESTADO (Mantido) ---
 if 'book_title' not in st.session_state:
     st.session_state['book_title'] = "O Último Código de Honra"
     st.session_state['book_author'] = "Carlos Honorato"
@@ -459,20 +549,20 @@ if 'book_title' not in st.session_state:
     st.session_state['incluir_indices_abnt'] = False
     if 'style_option' not in st.session_state:
         st.session_state['style_option'] = "Romance Clássico (Garamond)" 
+    # Novo estado para a taxa de tempo (Default 0.2s)
+    if 'time_rate_s' not in st.session_state:
+        st.session_state['time_rate_s'] = 0.2
 
-# --- CÁLCULOS DINÂMICOS (Executados em todas as execuções do script) ---
+# --- CÁLCULOS DINÂMICOS (Mantidos) ---
 format_option_default = "Padrão A5 (5.83x8.27 in)"
 selected_format_data_calc = KDP_SIZES.get(st.session_state.get('format_option', format_option_default), KDP_SIZES[format_option_default])
 
-# Cálculo da espessura da lombada (cm) = (Contagem de Páginas / 2) * Fator de Papel
 espessura_cm = round(st.session_state['page_count'] * selected_format_data_calc['papel_fator'], 2) 
-# Largura total = Frente + Lombada + Verso (+ 0.6 cm de sangria total)
 capa_largura_total_cm = round((selected_format_data_calc['width_cm'] * 2) + espessura_cm + 0.6, 2)
-# Altura total = Altura do corte + 0.6 cm de sangria (0.3cm em cima + 0.3cm embaixo)
 capa_altura_total_cm = round(selected_format_data_calc['height_cm'] + 0.6, 2)
 # --- FIM CÁLCULOS DINÂMICOS ---
 
-# --- FLUXO PRINCIPAL DO APLICATIVO (Tabs) ---
+# --- FLUXO PRINCIPAL DO APLICATIVO (Tabs - Mantido) ---
 
 config_tab, miolo_tab, capa_tab, export_tab = st.tabs([
     "1. Configuração Inicial", 
@@ -481,7 +571,7 @@ config_tab, miolo_tab, capa_tab, export_tab = st.tabs([
     "4. Análise & Exportar"
 ])
 
-# --- TAB 1: CONFIGURAÇÃO INICIAL ---
+# --- TAB 1: CONFIGURAÇÃO INICIAL (Atualizada com Slider de Taxa) ---
 
 with config_tab:
     st.header("Dados Essenciais para o Projeto")
@@ -497,7 +587,6 @@ with config_tab:
     
     col3, col4, col5 = st.columns(3)
     with col3:
-        # AQUI, se você usar st.session_state diretamente, não precisa do key.
         st.session_state['format_option'] = st.selectbox(
             "Tamanho de Corte Final (KDP/Gráfica):",
             options=list(KDP_SIZES.keys()),
@@ -513,11 +602,10 @@ with config_tab:
             "Template de Estilo de Diagramação:",
             options=list(STYLE_TEMPLATES.keys()),
             index=list(STYLE_TEMPLATES.keys()).index(current_style_key), 
-            key='style_option', # O widget gerencia st.session_state['style_option']
+            key='style_option', 
             help="Define fonte, tamanho e espaçamento (Ex: ABNT para trabalhos acadêmicos)."
         )
         selected_style_data = STYLE_TEMPLATES[style_option]
-        # A atribuição redundante foi removida
         
     with col5:
         incluir_indices_abnt = st.checkbox(
@@ -527,6 +615,16 @@ with config_tab:
             help="Adiciona placeholders para Sumário, Índice de Tabelas, Apêndices e Anexos."
         )
         st.session_state['incluir_indices_abnt'] = incluir_indices_abnt 
+        
+    st.subheader("Controle de Velocidade da IA (Controle de Taxa/Rate Limit)")
+    st.session_state['time_rate_s'] = st.slider(
+        "Atraso por Parágrafo (segundos):", 
+        min_value=0.1, 
+        max_value=1.0, 
+        value=st.session_state['time_rate_s'], 
+        step=0.1, 
+        help="Controla a velocidade da revisão IA para evitar o limite de taxa (Rate Limit) da OpenAI. Use uma taxa mais alta (ex: 0.5s) para manuscritos longos."
+    )
         
     st.subheader("Upload do Manuscrito")
     uploaded_file = st.file_uploader(
@@ -539,7 +637,7 @@ with config_tab:
     st.info(f"**Cálculo da Lombada (Spine):** **{espessura_cm} cm**. **Dimensão Total da Capa (com sangria 0.3cm):** **{capa_largura_total_cm} cm x {capa_altura_total_cm} cm**. Esses dados serão usados para a Capa IA.")
 
 
-# --- TAB 2: DIAGRAMAÇÃO & ELEMENTOS ---
+# --- TAB 2: DIAGRAMAÇÃO & ELEMENTOS (Atualizado) ---
 
 with miolo_tab:
     st.header("Fluxo de Diagramação e Revisão com IA")
@@ -560,7 +658,6 @@ with miolo_tab:
                 st.info("Processamento iniciado! Acompanhe o progresso abaixo...")
             
             selected_format_data = KDP_SIZES[st.session_state['format_option']]
-            # Agora acessamos o estilo diretamente do st.session_state (graças à chave)
             current_style_key = st.session_state.get('style_option', "Romance Clássico (Garamond)")
             selected_style_data = STYLE_TEMPLATES[current_style_key] 
             
@@ -571,7 +668,8 @@ with miolo_tab:
                 selected_format_data, 
                 selected_style_data, 
                 st.session_state['incluir_indices_abnt'], 
-                status_container 
+                status_container,
+                st.session_state['time_rate_s'] # Passa a taxa ajustável
             )
             
             # Armazena resultados no state
@@ -589,14 +687,14 @@ with miolo_tab:
         if st.session_state['documento_revisado']:
             current_style_key = st.session_state.get('style_option', "Romance Clássico (Garamond)")
             selected_style_data = STYLE_TEMPLATES[current_style_key] 
-            st.success(f"Miolo diagramado no formato **{st.session_state['format_option']}** com o estilo **'{selected_style_data['font_name']}'**.")
+            st.success(f"Miolo diagramado no formato **{st.session_state['format_option']}** com o estilo **'{selected_style_data['font_name']}**'.")
             
             st.subheader("Intervenção: Blurb da Contracapa")
             st.warning("O Blurb abaixo será usado no design da Capa Completa e no relatório de análise. **Edite-o** antes de gerar a capa.")
             st.session_state['blurb'] = st.text_area("Texto de Vendas (Blurb):", st.session_state['blurb'], height=300, key='blurb_text_area')
 
 
-# --- TAB 3: CAPA COMPLETA IA ---
+# --- TAB 3: CAPA COMPLETA IA (Atualizado) ---
 
 with capa_tab:
     st.header("Criação da Capa Completa (Frente, Lombada e Verso)")
@@ -626,24 +724,24 @@ with capa_tab:
             if not is_api_ready:
                 st.error("Chaves OpenAI não configuradas. Não é possível gerar a imagem.")
             else:
-                with st.spinner("Gerando design completo da capa (Frente, Lombada e Verso)... Este processo usa DALL-E 3 e pode levar até um minuto."):
-                    # Tempo de espera adicional para DALL-E 3
-                    time.sleep(5) 
-                    image_output = gerar_capa_ia_completa(
-                        st.session_state['capa_prompt'],
-                        st.session_state['blurb'],
-                        st.session_state['book_author'],
-                        st.session_state['book_title'],
-                        capa_largura_total_cm,
-                        capa_altura_total_cm,
-                        espessura_cm
-                    )
-                    
-                    if "http" in image_output: 
-                        st.session_state['generated_image_url'] = image_output
-                        st.success("Design de Capa Completa gerado! Prossiga para a aba '4. Exportar'.")
-                    else:
-                        st.error(image_output)
+                # Usa o novo wrapper de tempo
+                image_output, duration = run_fast_process_with_timer(
+                    "Geração do Design de Capa Completa (DALL-E 3)",
+                    gerar_capa_ia_completa,
+                    st.session_state['capa_prompt'],
+                    st.session_state['blurb'],
+                    st.session_state['book_author'],
+                    st.session_state['book_title'],
+                    capa_largura_total_cm,
+                    capa_altura_total_cm,
+                    espessura_cm
+                )
+                
+                if "http" in image_output: 
+                    st.session_state['generated_image_url'] = image_output
+                    st.toast("Capa Gerada!", icon="✅")
+                else:
+                    st.error(image_output) # Exibe o erro retornado pela função
 
         if st.session_state['generated_image_url']:
             st.subheader("Pré-visualização da Capa Gerada")
@@ -651,7 +749,7 @@ with capa_tab:
             st.info("Lembre-se: Esta é uma imagem do design. As dimensões exatas de impressão estão na aba **'Exportar'**.")
 
 
-# --- TAB 4: ANÁLISE & EXPORTAR ---
+# --- TAB 4: ANÁLISE & EXPORTAR (Atualizado) ---
 
 with export_tab:
     st.header("Relatórios Finais e Exportação")
@@ -663,12 +761,18 @@ with export_tab:
         # --- Relatório Estrutural ---
         st.subheader("1. Relatório Estrutural (Editor-Chefe)")
         if is_api_ready:
-            # Condição para evitar re-gerar o relatório desnecessariamente
-            if 'relatorio_estrutural' not in st.session_state or st.session_state['relatorio_estrutural'] == "" or st.button("Gerar/Atualizar Relatório Estrutural"):
-                with st.spinner("Analisando ritmo e personagens..."):
-                    time.sleep(0.3) # Atraso para o Relatório Estrutural
-                    relatorio = gerar_relatorio_estrutural(st.session_state['texto_completo'])
-                    st.session_state['relatorio_estrutural'] = relatorio
+            
+            if st.button("Gerar/Atualizar Relatório Estrutural"):
+                # Usa o novo wrapper de tempo
+                relatorio, duration = run_fast_process_with_timer(
+                    "Geração do Relatório Estrutural",
+                    gerar_relatorio_estrutural,
+                    st.session_state['texto_completo']
+                )
+                st.session_state['relatorio_estrutural'] = relatorio
+                
+                if "[ERRO DE CONEXÃO DA API]" not in relatorio:
+                    st.toast("Relatório Estrutural gerado!", icon="✅")
             
             if st.session_state.get('relatorio_estrutural') and "[ERRO DE CONEXÃO DA API]" not in st.session_state['relatorio_estrutural']:
                 st.markdown(st.session_state['relatorio_estrutural'])
@@ -684,18 +788,19 @@ with export_tab:
         st.subheader("2. Relatório Técnico e de Conformidade KDP")
         if st.button("Gerar/Atualizar Relatório Técnico KDP"):
             if is_api_ready:
-                with st.spinner("Gerando checklist técnico e de SEO para o upload..."):
-                    time.sleep(0.3) # Atraso para o Relatório KDP
-                    relatorio = gerar_relatorio_conformidade_kdp(
-                        st.session_state['book_title'], 
-                        st.session_state['book_author'], 
-                        st.session_state['page_count'], 
-                        selected_format_data_calc, 
-                        espessura_cm, 
-                        capa_largura_total_cm, 
-                        capa_altura_total_cm
-                    )
-                    st.session_state['relatorio_kdp'] = relatorio
+                # Usa o novo wrapper de tempo
+                relatorio, duration = run_fast_process_with_timer(
+                    "Geração do Relatório Técnico KDP",
+                    gerar_relatorio_conformidade_kdp,
+                    st.session_state['book_title'], 
+                    st.session_state['book_author'], 
+                    st.session_state['page_count'], 
+                    selected_format_data_calc, 
+                    espessura_cm, 
+                    capa_largura_total_cm, 
+                    capa_altura_total_cm
+                )
+                st.session_state['relatorio_kdp'] = relatorio
             else:
                 st.error("Chaves OpenAI não configuradas. Não é possível gerar relatórios.")
 
@@ -708,7 +813,7 @@ with export_tab:
             st.info("Clique no botão acima para gerar o checklist de publicação KDP.")
 
 
-        # --- Exportação de Arquivos ---
+        # --- Exportação de Arquivos (Mantido) ---
         st.subheader("3. Exportação de Arquivos Finais")
 
         # Função auxiliar para preparar o DOCX para download
