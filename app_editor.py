@@ -42,12 +42,13 @@ try:
              PROJECT_ID = st.secrets[PROJECT_ID_NAME]
     
     if not API_KEY or not PROJECT_ID:
+        # Apenas mostra o erro se a API não estiver definida, mas permite a execução
+        # para visualização da interface (embora as funções de IA falhem).
         st.error(f"ERRO: Chave e ID do Projeto OpenAI não configurados. Por favor, adicione '{API_KEY_NAME}' e '{PROJECT_ID_NAME}' no Streamlit Secrets.")
-        st.stop()
         
     client = OpenAI(
-        api_key=API_KEY,
-        project=PROJECT_ID 
+        api_key=API_KEY if API_KEY else "dummy_key", # Usa dummy key se não estiver em secrets
+        project=PROJECT_ID if PROJECT_ID else "dummy_project"
     )
 except Exception as e:
     st.error(f"Erro na inicialização da API: {e}")
@@ -134,8 +135,24 @@ def gerar_relatorio_estilo_avancado(texto_completo: str) -> str:
     user_content = f"MANUSCRITO PARA ANÁLISE DE ESTILO:\n---\n{texto_completo[:10000]}\n---"
     return call_openai_api(system_prompt, user_content)
 
+# --- 6. Geração de Conteúdo de Capa/Contracapa (Marketing) ---
+def gerar_conteudo_capa_contracapa(titulo: str, autor: str, texto_completo: str) -> str:
+    """Gera o blurb para contracapa e sugestões de arte."""
+    system_prompt = """
+    Você é um Copywriter de Best-sellers e Designer de Capas. Sua tarefa é criar um blurb de contracapa envolvente e dar sugestões visuais.
+    Gere o resultado no formato estrito:
+    
+    ### BLURB (Contracapa)
+    [Texto de 3-4 parágrafos, emocionante e com gancho, para a contracapa.]
+    
+    ### SUGESTÃO DE ARTE PARA A CAPA:
+    [Descrição visual detalhada (prompt) para uma IA de geração de imagem (DALL-E 3). Foque em cores, elementos e estilo artístico que capturem a essência do livro.]
+    """
+    user_content = f"Título: {titulo}, Autor: {autor}. Manuscrito (Amostra): {texto_completo[:5000]}"
+    return call_openai_api(system_prompt, user_content)
 
-# --- 6. Geração do Relatório de Conformidade KDP (Mantido) ---
+
+# --- 7. Geração do Relatório de Conformidade KDP (Mantido) ---
 def gerar_relatorio_conformidade_kdp(titulo: str, autor: str, page_count: int, format_data: dict, espessura_cm: float, capa_largura_total_cm: float, capa_altura_total_cm: float) -> str:
     """Gera um checklist de conformidade técnica para upload na Amazon KDP."""
     tamanho_corte = format_data['name']
@@ -159,7 +176,7 @@ def gerar_relatorio_conformidade_kdp(titulo: str, autor: str, page_count: int, f
     return call_openai_api("Você é um especialista em publicação KDP.", prompt_kdp)
 
 
-# --- 7. NOVO: Função de Geração de Imagem para Capa ---
+# --- 8. Função: Geração de Imagem para Capa ---
 def gerar_capa_ia(prompt_capa: str) -> str:
     """
     Chama a API DALL-E 3 para gerar uma imagem para a capa do livro.
@@ -181,7 +198,7 @@ def gerar_capa_ia(prompt_capa: str) -> str:
         return f"[ERRO GERAÇÃO DE CAPA] Falha ao gerar a imagem: {e}. Verifique se sua conta OpenAI tem créditos para DALL-E 3."
 
 
-# --- 8. Funções de Diagramação: Inserção de Páginas Pré-textuais e Sumário ---
+# --- 9. Funções de Diagramação: Inserção de Páginas Pré-textuais e Sumário ---
 
 def adicionar_pagina_rosto(documento: Document, titulo: str, autor: str, style_data: dict):
     """Adiciona uma página de rosto formatada."""
@@ -219,16 +236,16 @@ def adicionar_sumario_placeholder(documento: Document):
     documento.add_paragraph("").add_run().add_break() # Espaço
     documento.add_paragraph("").add_run().add_break() # Espaço
 
-    p_inst = documento.add_paragraph("Para gerar o índice automático, vá em 'Referências' -> 'Sumário' e clique em 'Inserir Sumário'.")
+    p_inst = documento.add_paragraph("Para gerar o índice automático no documento final, vá em 'Referências' -> 'Sumário' e clique em 'Inserir Sumário'. Todos os títulos de capítulo já foram marcados.")
     p_inst.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_inst.runs[0].font.size = Pt(10)
 
     documento.add_page_break()
 
 
-# --- 9. Função Principal: Processamento de Revisão e Diagramação DOCX ---
+# --- 10. Função Principal: Processamento de Revisão e Diagramação DOCX ---
 
-def processar_manuscrito(uploaded_file, format_data, style_data, pre_text_content):
+def processar_manuscrito(uploaded_file, format_data, style_data, pre_text_content, status_placeholder):
     documento_original = Document(uploaded_file)
     documento_revisado = Document()
     
@@ -289,7 +306,7 @@ def processar_manuscrito(uploaded_file, format_data, style_data, pre_text_conten
         texto_completo += texto_original + "\n"
         
         percent_complete = int((i + 1) / total_paragrafos * 100)
-        progress_bar.progress(percent_complete, text=f"Processando {percent_complete}% ({i+1}/{total_paragrafos})")
+        progress_bar.progress(percent_complete, text=f"Fase 2/7: Revisando e diagramando o miolo... {percent_complete}%")
 
         if len(texto_original.strip()) < 10:
             documento_revisado.add_paragraph(texto_original)
@@ -316,8 +333,7 @@ def processar_manuscrito(uploaded_file, format_data, style_data, pre_text_conten
         else:
             novo_paragrafo.style = 'Normal'
         
-    progress_bar.progress(100, text="Processamento concluído! 🎉")
-    st.success(f"Manuscrito revisado, formatado e diagramado no formato {format_data['name']} com estilo '{style_data['font_name']}'.")
+    progress_bar.progress(100, text="Fase 2/7: Revisão e diagramação do miolo concluída! 🎉")
 
     # --- INSERÇÃO DA PÁGINA PÓS-TEXTUAL ---
     documento_revisado.add_page_break()
@@ -333,7 +349,7 @@ def processar_manuscrito(uploaded_file, format_data, style_data, pre_text_conten
     return documento_revisado, texto_completo
 
 
-# --- 10. Interface do Streamlit (UI) ---
+# --- 11. Interface do Streamlit (UI) ---
 
 # Inicialização dos dados na sessão
 if 'book_title' not in st.session_state:
@@ -394,41 +410,71 @@ if uploaded_file is not None and st.button("3. Iniciar PRÉ-IMPRESSÃO COMPLETA"
         
     st.info("Atenção: O processo de Pré-Impressão foi iniciado. Isso pode levar alguns minutos...")
     
+    # --- NOVO: Placeholder para o status detalhado ---
+    status_placeholder = st.empty()
+    
     # --- PASSO 0: Geração dos Elementos Pré-textuais ---
+    status_placeholder.info("Fase 1/7: Gerando conteúdo de Copyright e 'Sobre o Autor' com IA...")
     with st.spinner("Gerando conteúdo de Copyright e a página 'Sobre o Autor' com a IA..."):
         # Usamos uma amostra do texto para que a IA capture o tom
+        uploaded_file.seek(0)
         pre_text_content = gerar_elementos_pre_textuais(st.session_state['book_title'], st.session_state['book_author'], 2025, uploaded_file.getvalue().decode('utf-8', errors='ignore')[:5000])
 
     # Processa o manuscrito (revisão e diagrama)
-    documento_revisado, texto_completo = processar_manuscrito(uploaded_file, selected_format_data, selected_style_data, pre_text_content)
+    status_placeholder.info("Fase 2/7: Processando a Revisão e Diagramação Parágrafo a Parágrafo...")
+    uploaded_file.seek(0)
+    documento_revisado, texto_completo = processar_manuscrito(uploaded_file, selected_format_data, selected_style_data, pre_text_content, status_placeholder)
     
     if documento_revisado:
+        
         # --- PASSO A: Geração do Relatório Estrutural ---
+        status_placeholder.info("Fase 3/7: Gerando o Relatório Estrutural (Editor-Chefe)...")
         st.subheader("RESULTADO 1: Relatório Estrutural (Editor-Chefe)")
         with st.spinner("Analisando ritmo e personagens para o relatório estrutural..."):
             relatorio = gerar_relatorio_estrutural(texto_completo)
         st.text_area("Relatório Estrutural da IA:", relatorio, height=300)
         
         # --- PASSO B: Relatório de Estilo Avançado ---
+        status_placeholder.info("Fase 4/7: Gerando o Relatório de Estilo Avançado (Vícios e Clichês)...")
         st.subheader("RESULTADO 2: Relatório de Estilo (Contra Vícios e Clichês)")
         with st.spinner("Análise de vícios de linguagem e fluidez da escrita..."):
             relatorio_estilo = gerar_relatorio_estilo_avancado(texto_completo)
         st.markdown(relatorio_estilo)
         
         # --- PASSO C: Conteúdo de Capa/Contracapa (Marketing) ---
+        status_placeholder.info("Fase 5/7: Gerando o Blurb de Marketing e Sugestões de Arte...")
         st.subheader("RESULTADO 3: Conteúdo de Capa/Contracapa (Marketing)")
         with st.spinner("Criando o blurb de marketing e sugestões de design..."):
             conteudo_capa = gerar_conteudo_capa_contracapa(st.session_state['book_title'], st.session_state['book_author'], texto_completo)
         st.text_area("Conteúdo de Vendas e Sugestões de Arte:", conteudo_capa, height=400)
 
-        # --- NOVO PASSO D: Geração de Capa com IA ---
+        # --- PASSO D: Cálculos Técnicos DINÂMICOS ---
+        status_placeholder.info("Fase 6/7: Realizando Cálculos Técnicos (Lombada/Capa) e Relatório KDP...")
+        papel_fator = selected_format_data['papel_fator'] 
+        espessura_cm = round(page_count * papel_fator, 2) 
+        capa_largura_total_cm = round((selected_format_data['width_cm'] * 2) + espessura_cm, 2)
+        capa_altura_total_cm = round(selected_format_data['height_cm'] + 0.6, 2)
+
+        # --- PASSO E: Geração do Relatório de Conformidade KDP ---
+        st.subheader("RESULTADO 5: Relatório de Conformidade KDP (Amazon)")
+        with st.spinner("Gerando checklist técnico e de SEO para o upload na Amazon..."):
+            relatorio_kdp = gerar_relatorio_conformidade_kdp(
+                st.session_state['book_title'], st.session_state['book_author'], page_count, selected_format_data, 
+                espessura_cm, capa_largura_total_cm, capa_altura_total_cm
+            )
+        st.markdown(relatorio_kdp)
+        
+        # --- FIM DO FLUXO PRINCIPAL ---
+        status_placeholder.success("Fase 7/7: Processamento Concluído! Resultados Prontos para Análise e Geração de Capa.")
+        
+        # --- RESULTADO 4: Geração de Capa com IA ---
         st.subheader("RESULTADO 4: Criação de Capa com IA")
         st.markdown("Use o prompt abaixo (ou edite) para gerar uma imagem de capa. Pode levar alguns segundos.")
         
-        # Preenche o prompt da capa com a sugestão de arte da IA de texto
         if "SUGESTÃO DE ARTE PARA A CAPA:" in conteudo_capa:
             sugestao_arte = conteudo_capa.split("SUGESTÃO DE ARTE PARA A CAPA:")[1].strip()
-            st.session_state['capa_prompt'] = st.text_area("Prompt para a Imagem da Capa:", sugestao_arte, height=100)
+            # Garante que o prompt original da IA seja usado se a caixa não tiver sido modificada
+            st.session_state['capa_prompt'] = st.text_area("Prompt para a Imagem da Capa:", sugestao_arte if st.session_state['capa_prompt'] == "Uma antiga biblioteca secreta com um livro empoeirado aberto, luz mística emanando dele, estilo arte digital, cores escuras e douradas, suspense." else st.session_state['capa_prompt'], height=100)
         else:
             st.session_state['capa_prompt'] = st.text_area("Prompt para a Imagem da Capa:", st.session_state['capa_prompt'], height=100)
 
@@ -456,23 +502,8 @@ if uploaded_file is not None and st.button("3. Iniciar PRÉ-IMPRESSÃO COMPLETA"
             except Exception as e:
                 st.warning(f"Não foi possível baixar a imagem da capa: {e}")
 
-        # --- PASSO E: Cálculos Técnicos DINÂMICOS ---
-        papel_fator = selected_format_data['papel_fator'] 
-        espessura_cm = round(page_count * papel_fator, 2) 
-        capa_largura_total_cm = round((selected_format_data['width_cm'] * 2) + espessura_cm, 2)
-        capa_altura_total_cm = round(selected_format_data['height_cm'] + 0.6, 2)
-
-        # --- PASSO F: Geração do Relatório de Conformidade KDP ---
-        st.subheader("RESULTADO 5: Relatório de Conformidade KDP (Amazon)")
-        with st.spinner("Gerando checklist técnico e de SEO para o upload na Amazon..."):
-            relatorio_kdp = gerar_relatorio_conformidade_kdp(
-                st.session_state['book_title'], st.session_state['book_author'], page_count, selected_format_data, 
-                espessura_cm, capa_largura_total_cm, capa_altura_total_cm
-            )
-        st.markdown(relatorio_kdp)
-
         
-        # --- PASSO G: Resumo Técnico Final e Downloads ---
+        # --- RESULTADO 6: Resumo Técnico Final e Downloads ---
         st.subheader("RESULTADO 6: Resumo Técnico Final e Downloads")
         
         st.markdown(f"""
@@ -485,7 +516,7 @@ if uploaded_file is not None and st.button("3. Iniciar PRÉ-IMPRESSÃO COMPLETA"
         """)
 
 
-        # --- PASSO H: Download dos Arquivos ---
+        # --- Downloads Finais ---
         st.markdown("#### ⬇️ Downloads Finais")
         
         # Download do DOCX Diagramado
@@ -500,9 +531,9 @@ if uploaded_file is not None and st.button("3. Iniciar PRÉ-IMPRESSÃO COMPLETA"
         )
         
         # Downloads dos Relatórios (opcional)
-        relatorio_buffer = BytesIO((relatorio + "\n\n---\n\n" + relatorio_estilo).encode('utf-8'))
+        relatorio_buffer = BytesIO((relatorio + "\n\n---\n\n" + relatorio_estilo + "\n\n---\n\n" + relatorio_kdp).encode('utf-8'))
         st.download_button(
-            label="2. Baixar Todos os Relatórios (Estrutura e Estilo) (.txt)",
+            label="2. Baixar Todos os Relatórios (Estrutura, Estilo e KDP) (.txt)",
             data=relatorio_buffer,
             file_name="Relatorios_Completos.txt",
             mime="text/plain"
