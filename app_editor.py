@@ -484,7 +484,7 @@ config_tab, miolo_tab, capa_tab, export_tab = st.tabs([
 # --- TAB 1: CONFIGURAÇÃO INICIAL ---
 
 with config_tab:
-    st.subheader("Dados Essenciais para o Projeto")
+    st.header("Dados Essenciais para o Projeto")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -493,10 +493,11 @@ with config_tab:
     with col2:
         st.session_state['book_author'] = st.text_input("Nome do Autor", st.session_state['book_author'])
         
-    st.subheader("Escolha de Formato e Estilo")
+    st.header("Escolha de Formato e Estilo")
     
     col3, col4, col5 = st.columns(3)
     with col3:
+        # AQUI, se você usar st.session_state diretamente, não precisa do key.
         st.session_state['format_option'] = st.selectbox(
             "Tamanho de Corte Final (KDP/Gráfica):",
             options=list(KDP_SIZES.keys()),
@@ -512,11 +513,11 @@ with config_tab:
             "Template de Estilo de Diagramação:",
             options=list(STYLE_TEMPLATES.keys()),
             index=list(STYLE_TEMPLATES.keys()).index(current_style_key), 
-            key='style_option', 
+            key='style_option', # O widget gerencia st.session_state['style_option']
             help="Define fonte, tamanho e espaçamento (Ex: ABNT para trabalhos acadêmicos)."
         )
         selected_style_data = STYLE_TEMPLATES[style_option]
-        st.session_state['style_option'] = style_option 
+        # LINHA 519 (AGORA LINHA 508) REMOVIDA: st.session_state['style_option'] = style_option
         
     with col5:
         incluir_indices_abnt = st.checkbox(
@@ -559,7 +560,9 @@ with miolo_tab:
                 st.info("Processamento iniciado! Acompanhe o progresso abaixo...")
             
             selected_format_data = KDP_SIZES[st.session_state['format_option']]
-            selected_style_data = STYLE_TEMPLATES[st.session_state.get('style_option', "Romance Clássico (Garamond)")] 
+            # Agora acessamos o estilo diretamente do st.session_state (graças à chave)
+            current_style_key = st.session_state.get('style_option', "Romance Clássico (Garamond)")
+            selected_style_data = STYLE_TEMPLATES[current_style_key] 
             
             # Reseta o ponteiro do arquivo para o início antes de processar
             uploaded_file.seek(0)
@@ -584,7 +587,8 @@ with miolo_tab:
             st.toast("Miolo Pronto!", icon="✅")
             
         if st.session_state['documento_revisado']:
-            selected_style_data = STYLE_TEMPLATES[st.session_state.get('style_option', "Romance Clássico (Garamond)")] 
+            current_style_key = st.session_state.get('style_option', "Romance Clássico (Garamond)")
+            selected_style_data = STYLE_TEMPLATES[current_style_key] 
             st.success(f"Miolo diagramado no formato **{st.session_state['format_option']}** com o estilo **'{selected_style_data['font_name']}'**.")
             
             st.subheader("Intervenção: Blurb da Contracapa")
