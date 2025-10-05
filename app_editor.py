@@ -8,13 +8,13 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 import requests 
 from docx.enum.style import WD_STYLE_TYPE
 import time 
-from typing import Optional, Dict, Tuple, Any
+from typing import Optional, Dict, Tuple, Any, List
 import math 
+import json # Importação para lidar com o arquivo JSON do checkpoint
 
 # --- CONFIGURAÇÃO DE CONSTANTES ---
 
 # 1. DICIONÁRIO DE TAMANHOS KDP/GRÁFICA (Miolo)
-# Fator de Papel (papel_fator): Espessura por página em cm (ex: 80gsm/50lb é cerca de 0.00115 cm/página)
 KDP_SIZES: Dict[str, Dict] = {
     "Padrão EUA (6x9 in)": {"name": "6 x 9 in", "width_in": 6.0, "height_in": 9.0, "width_cm": 15.24, "height_cm": 22.86, "papel_fator": 0.00115}, 
     "Padrão A5 (5.83x8.27 in)": {"name": "A5 (14.8 x 21 cm)", "width_in": 5.83, "height_in": 8.27, "width_cm": 14.8, "height_cm": 21.0, "papel_fator": 0.00115},
@@ -46,7 +46,7 @@ PROJECT_ID: Optional[str] = None
 is_api_ready: bool = False # Inicializa como False
 
 try:
-    # 1. Tenta carregar as chaves do Streamlit Secrets ou Ambiente (Melhor Prática)
+    # Tenta obter as chaves de segurança do ambiente (secrets ou variáveis de ambiente)
     if hasattr(st, 'secrets'):
         API_KEY = st.secrets.get(API_KEY_NAME, os.environ.get(API_KEY_NAME))
         PROJECT_ID = st.secrets.get(PROJECT_ID_NAME, os.environ.get(PROJECT_ID_NAME))
@@ -54,14 +54,13 @@ try:
         API_KEY = os.environ.get(API_KEY_NAME)
         PROJECT_ID = os.environ.get(PROJECT_ID_NAME)
 
-    # 2. Se as chaves estiverem presentes, inicializa o cliente
     if API_KEY and PROJECT_ID:
         client = OpenAI(api_key=API_KEY, project=PROJECT_ID)
         is_api_ready = True 
     
     if not is_api_ready:
         st.sidebar.error("❌ Conexão OpenAI Inativa.")
-        st.warning(f"Chave e ID do Projeto OpenAI não configurados. A revisão e a geração de capa **NÃO** funcionarão. Por favor, adicione **'{API_KEY_NAME}'** e **'{PROJECT_ID_NAME}'** no Streamlit Secrets ou variáveis de ambiente.")
+        st.warning(f"Chave e ID do Projeto OpenAI não configurados. A revisão e a geração de capa **NÃO** funcionarão.")
         
     if is_api_ready:
         st.sidebar.success("✅ Conexão OpenAI Pronta!")
@@ -74,13 +73,15 @@ except Exception as e:
 
 # --- FUNÇÕES DE AUXÍLIO ---
 
-def call_openai_api(system_prompt: str, user_content: str, max_tokens: int = 3000, retries: int = 3) -> str:
-    """Função genérica para chamar a API da OpenAI com backoff exponencial."""
-    
+def call_openai_api(system_prompt: str, user_content: str, max_tokens: int = 3000, retries: int = 5) -> str:
+    """
+    Função genérica para chamar a API da OpenAI com backoff exponencial.
+    O número de tentativas é 5 para resiliência contra instabilidade de rede ou da API.
+    """
     global client, is_api_ready
 
     if not is_api_ready or client is None:
-        return "[ERRO DE CONEXÃO DA API] Chaves OPENAI_API_KEY e/ou OPENAI_PROJECT_ID não configuradas. Verifique Streamlit Secrets."
+        return "[ERRO DE CONEXÃO DA API] Chaves OPENAI_API_KEY e/ou OPENAI_PROJECT_ID não configuradas."
 
     for i in range(retries):
         try:
@@ -98,27 +99,22 @@ def call_openai_api(system_prompt: str, user_content: str, max_tokens: int = 300
             error_msg = str(e)
             
             if "Invalid API key" in error_msg or "Error code: 401" in error_msg:
-                st.error(f"ERRO DE AUTENTICAÇÃO: Sua chave de API está incorreta ou expirada. Detalhes: {error_msg}")
+                st.error(f"ERRO DE AUTENTICAÇÃO: Sua chave de API está incorreta ou expirada.")
                 return "[ERRO DE CONEXÃO DA API] Chave de API Inválida."
 
-            elif ("Rate limit reached" in error_msg or "Error code: 429" in error_msg) and i < retries - 1:
-                wait_time = 2 ** i # Backoff exponencial (1s, 2s, 4s...)
-                st.warning(f"Limite de taxa atingido. Tentando novamente em {wait_time} segundos... (Tentativa {i+1}/{retries})")
+            elif i < retries - 1:
+                wait_time = 2 ** i # Backoff exponencial
+                st.warning(f"Erro de API/Rede. Tentando novamente em {wait_time} segundos... (Tentativa {i+1}/{retries})")
                 time.sleep(wait_time)
             else:
-                st.error(f"Falha ao se comunicar com a OpenAI. Detalhes: {e}")
+                st.error(f"Falha ao se comunicar com a OpenAI após {retries} tentativas. Detalhes: {e}")
                 return f"[ERRO DE CONEXÃO DA API] Falha: {e}"
                 
-    return "[ERRO DE CONEXÃO DA API] Tentativas de conexão esgotadas devido a Rate Limit ou erro desconhecido."
+    return "[ERRO DE CONEXÃO DA API] Tentativas de conexão esgotadas."
 
 def run_fast_process_with_timer(message: str, func: callable, *args: Any, **kwargs: Any) -> Tuple[str, float]:
-    """
-    Função genérica para chamar a API com timer e spinner, retornando
-    o resultado e o tempo de duração.
-    """
     start_time = time.time()
     
-    # Usa st.spinner para exibir o cronômetro ascendente e a mensagem
     with st.spinner(f"⏳ {message}..."):
         result = func(*args, **kwargs)
         
@@ -126,10 +122,8 @@ def run_fast_process_with_timer(message: str, func: callable, *args: Any, **kwar
     
     if "[ERRO DE CONEXÃO DA API]" in str(result):
         st.error(f"❌ {message} falhou em **{duration}s**. Verifique o log de erros.")
-        # Retorna o erro no resultado
         return result, duration 
     else:
-        # Se for bem-sucedido, exibe a duração
         st.success(f"✅ {message} concluída em **{duration}s**.")
         return result, duration
 
@@ -144,27 +138,24 @@ def revisar_paragrafo(paragrafo_texto: str, delay_s: float) -> str:
     texto_revisado = call_openai_api(system_prompt, user_content, max_tokens=500)
     
     if "[ERRO DE CONEXÃO DA API]" in texto_revisado:
+        # Se houver erro de API, retorna o texto original para não perder o parágrafo.
         return paragrafo_texto
     
-    # Atraso ajustável pelo usuário
     time.sleep(delay_s) 
     
     return texto_revisado
 
 def gerar_conteudo_marketing(titulo: str, autor: str, texto_completo: str) -> str:
-    """Gera o blurb para contracapa e sugestões de arte."""
     system_prompt = "Você é um Copywriter de Best-sellers. Sua tarefa é criar um blurb de contracapa envolvente (3-4 parágrafos). Gere o resultado *APENAS* com o texto do blurb, sem títulos."
     user_content = f"Crie um blurb de contracapa de 3-4 parágrafos para este livro: Título: {titulo}, Autor: {autor}. Amostra: {texto_completo[:5000]}"
     return call_openai_api(system_prompt, user_content, max_tokens=1000)
 
 def gerar_relatorio_estrutural(texto_completo: str) -> str:
-    """Analisa o texto completo para dar feedback estrutural."""
     system_prompt = "Você é um Editor-Chefe. Gere um breve Relatório de Revisão para o autor. Foque em: Ritmo da Narrativa, Desenvolvimento de Personagens e Estrutura Geral. Use títulos e bullet points."
     user_content = f"MANUSCRITO PARA ANÁLISE (Amostra): {texto_completo[:15000]}"
     return call_openai_api(system_prompt, user_content)
 
 def gerar_elementos_pre_textuais(titulo: str, autor: str, ano: int, texto_completo: str) -> str:
-    """Gera o texto de Copyright e a bio para a página Sobre o Autor."""
     system_prompt = """
     Você é um gerente de editora. Gere o conteúdo essencial de abertura e fechamento para um livro.
     Gere o resultado no formato estrito:
@@ -179,7 +170,6 @@ def gerar_elementos_pre_textuais(titulo: str, autor: str, ano: int, texto_comple
     return call_openai_api(system_prompt, user_content)
 
 def gerar_relatorio_conformidade_kdp(titulo: str, autor: str, page_count: int, format_data: Dict, espessura_cm: float, capa_largura_total_cm: float, capa_altura_total_cm: float) -> str:
-    """Gera um checklist de conformidade técnica para upload na Amazon KDP."""
     tamanho_corte = format_data['name']
     prompt_kdp = f"""
     Você é um Especialista Técnico em Publicação e Conformidade da Amazon KDP. Gere um Relatório de Conformidade focado em upload bem-sucedido para Livros Físicos (Brochura) e eBooks.
@@ -201,17 +191,13 @@ def gerar_relatorio_conformidade_kdp(titulo: str, autor: str, page_count: int, f
     """
     return call_openai_api("Você é um especialista em publicação KDP.", prompt_kdp)
 
-
-# --- FUNÇÃO DE GERAÇÃO DE CAPA COMPLETA ---
 def gerar_capa_ia_completa(prompt_visual: str, blurb: str, autor: str, titulo: str, largura_cm: float, altura_cm: float, espessura_cm: float) -> str:
-    """
-    Chama a API DALL-E 3 para gerar a imagem da capa COMPLETA (Frente, Lombada e Verso).
-    """
+    """Chama a API DALL-E 3 para gerar a imagem da capa COMPLETA."""
     
     global client, is_api_ready
 
     if not is_api_ready or client is None:
-        return "[ERRO GERAÇÃO DE CAPA] Chaves OPENAI_API_KEY e/ou OPENAI_PROJECT_ID não configuradas. Verifique Streamlit Secrets."
+        return "[ERRO GERAÇÃO DE CAPA] Chaves OPENAI_API_KEY e/ou OPENAI_PROJECT_ID não configuradas."
         
     full_prompt = f"""
     Crie uma imagem de CAPA COMPLETA E ÚNICA para impressão, com texto. As dimensões físicas totais (largura x altura) são: {largura_cm} cm x {altura_cm} cm. A lombada tem {espessura_cm} cm de espessura, localizada no centro.
@@ -228,80 +214,66 @@ def gerar_capa_ia_completa(prompt_visual: str, blurb: str, autor: str, titulo: s
         response = client.images.generate(
             model="dall-e-3",
             prompt=full_prompt,
-            size="1792x1024", # Melhor proporção para capa completa (Horizontal)
+            size="1792x1024", 
             quality="hd", 
             n=1 
         )
         image_url = response.data[0].url
         return image_url
     except Exception as e:
-        return f"[ERRO GERAÇÃO DE CAPA] Falha ao gerar a imagem: {e}. Verifique se sua conta OpenAI tem créditos para DALL-E 3 e se o prompt não viola as diretrizes."
+        return f"[ERRO GERAÇÃO DE CAPA] Falha ao gerar a imagem: {e}. Verifique se sua conta OpenAI tem créditos para DALL-E 3."
 
-# --- FUNÇÕES DOCX AVANÇADAS (mantidas) ---
+# --- FUNÇÕES DOCX AVANÇADAS ---
 
 def adicionar_pagina_rosto(documento: Document, titulo: str, autor: str, style_data: Dict):
-    """Adiciona uma página de rosto formatada."""
     font_name = style_data['font_name']
-    
     documento.add_page_break()
-
     p_title = documento.add_paragraph()
     p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_title.add_run(titulo).bold = True
     p_title.runs[0].font.size = Pt(24) 
     p_title.runs[0].font.name = font_name
-    
     for _ in range(5):
         documento.add_paragraph()
-    
     p_author = documento.add_paragraph()
     p_author.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_author.add_run(autor)
     p_author.runs[0].font.size = Pt(16)
     p_author.runs[0].font.name = font_name
-
     documento.add_page_break()
-
 
 def adicionar_pagina_generica(documento: Document, titulo: str, subtitulo: Optional[str] = None):
-    """Adiciona uma página de título formatada e um placeholder."""
     documento.add_page_break()
-    
     p_header = documento.add_paragraph()
     p_header.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_header.add_run(titulo).bold = True
     p_header.runs[0].font.size = Pt(18)
-    
     if subtitulo:
         p_sub = documento.add_paragraph()
         p_sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p_sub.add_run(subtitulo).italic = True
         p_sub.runs[0].font.size = Pt(12)
-    
     documento.add_paragraph("")
-    
     if titulo == "Sumário":
         p_inst = documento.add_paragraph("⚠️ Para gerar o índice automático, use a função 'Referências' -> 'Sumário' do seu editor de texto. Todos os títulos de capítulo já foram marcados (**Estilo: Título 1**).")
     else:
         p_inst = documento.add_paragraph("⚠️ Este é um placeholder. Insira o conteúdo real aqui após o download. O espaço e a numeração já estão configurados.")
-        
     p_inst.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_inst.runs[0].font.size = Pt(10)
     documento.add_page_break()
 
 
-# --- FUNÇÃO PRINCIPAL DE DIAGRAMAÇÃO E REVISÃO ---
+# --- FUNÇÃO PRINCIPAL DE DIAGRAMAÇÃO E REVISÃO (Com Checkpointing) ---
+
 def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, incluir_indices_abnt: bool, status_container, time_rate_s: float): 
     
     global is_api_ready 
-    
-    # 1. Limpa o container de status no início do processo
     status_container.empty()
 
     documento_original = Document(uploaded_file)
     documento_revisado = Document()
     
-    # --- 1. Configuração de Layout e Estilo (Mantido) ---
+    # 1. Configuração de Layout e Estilo
     section = documento_revisado.sections[0]
     section.page_width = Inches(format_data['width_in'])
     section.page_height = Inches(format_data['height_in'])
@@ -323,8 +295,6 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
     paragraph_format.first_line_indent = Inches(indent_in) 
     
     # --- 2. Geração dos Elementos Pré-textuais (Fase 1) ---
-    
-    # Prepara amostra do manuscrito
     uploaded_file.seek(0)
     manuscript_sample = uploaded_file.getvalue().decode('utf-8', errors='ignore')[:5000]
 
@@ -332,121 +302,130 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
         st.subheader("Fase 1/3: Geração de Elementos Pré-textuais")
         
     if is_api_ready:
-        # Usa o novo wrapper de tempo
         pre_text_content, duration = run_fast_process_with_timer(
-            "Geração de Elementos Pré-textuais (Copyright e Bio)",
-            gerar_elementos_pre_textuais, 
+            "Geração de Copyright e Bio do Autor (IA)",
+            gerar_elementos_pre_textuais,
             st.session_state['book_title'], 
             st.session_state['book_author'], 
             2025, 
             manuscript_sample
         )
     else:
-        pre_text_content = """
-        ### 1. Página de Copyright e Créditos
-        [Conteúdo de Copyright Padrão: Edite após o download. A IA não está conectada para gerar este texto.]
-        
-        ### 2. Página 'Sobre o Autor'
-        [Conteúdo sobre o Autor Padrão: Edite após o download. A IA não está conectada para gerar a bio envolvente.]
-        """
-        # Exibe status de pular a fase se a API não estiver pronta
+        pre_text_content = "### 1. Página de Copyright e Créditos\n[Placeholder de Copyright]\n### 2. Página 'Sobre o Autor'\n[Placeholder de Bio]"
         with status_container:
             st.warning("⚠️ Elementos Pré-textuais pulados: Conexão OpenAI inativa.")
 
-    # --- 3. Inserção de Elementos Pré-textuais no DOCX (Mantido) ---
-    
-    # Página de Rosto (Título e Autor)
+    # Inserção de Páginas de Abertura
     adicionar_pagina_rosto(documento_revisado, st.session_state['book_title'], st.session_state['book_author'], style_data)
     
-    # Página de Copyright
     try:
-        copyright_text_full = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[0].strip() 
-        copyright_text_full = copyright_text_full.replace("### 1. Página de Copyright e Créditos", "").strip() 
+        copyright_text_full = pre_text_content.split('### 1. Página de Copyright e Créditos')[1].split('### 2. Página \'Sobre o Autor\'')[0].strip()
     except IndexError:
-        copyright_text_full = "[Erro ao extrair o texto de Copyright. Verifique a conexão da API.]"
+        copyright_text_full = "[Erro ao extrair Copyright. Verifique a conexão da API.]"
     
-    p_copy_title = documento_revisado.add_paragraph("### 1. Página de Copyright e Créditos")
-    p_copy_title.style = 'Normal'
-    p_copy_title.runs[0].font.size = Pt(10)
-    p_copy_title.runs[0].bold = True
-    p_copy = documento_revisado.add_paragraph(copyright_text_full)
-    p_copy.style = 'Normal'
-    p_copy.runs[0].font.size = Pt(8) 
-    documento_revisado.add_page_break()
-
-    # Sumário (Placeholder e Instruções)
+    adicionar_pagina_generica(documento_revisado, "Página de Créditos", "Informações de Copyright e ISBN")
+    for line in copyright_text_full.split('\n'):
+        if line.strip():
+            documento_revisado.add_paragraph(line.strip(), style='Normal')
+            
     adicionar_pagina_generica(documento_revisado, "Sumário")
-    
-    if incluir_indices_abnt:
-        adicionar_pagina_generica(documento_revisado, "Índice de Tabelas", "Placeholder para Tabelas")
-        adicionar_pagina_generica(documento_revisado, "Índice de Ilustrações", "Placeholder para Ilustrações")
 
-    # --- 4. Processamento do Miolo (Fase 2 - Revisão Parágrafo a Parágrafo) ---
+    # --- 3. Processamento do Miolo (Fase 2 - Revisão Parágrafo a Parágrafo com Checkpointing) ---
     
     paragrafos = documento_original.paragraphs
+    # Filtra apenas parágrafos com conteúdo significativo para revisão IA
     paragrafos_para_revisar = [p for p in paragrafos if len(p.text.strip()) >= 10]
     
     total_paragrafos = len(paragrafos)
     texto_completo = ""
     revisados_count = 0
-
+    
+    # Obtém a referência para o estado de checkpoint
+    processed_state_map = st.session_state['processed_state'] 
+    
+    # Cálculo para determinar quantos já foram revisados
+    already_processed_count = 0
+    for p in paragrafos_para_revisar:
+        if p.text.strip() in processed_state_map:
+            already_processed_count += 1
+            
+    
     # LÓGICA DE TEMPORIZADOR PARA ESTIMATIVA INICIAL E CONTAGEM REGRESSIVA
     total_a_revisar = len(paragrafos_para_revisar)
-    # Estimativa de tempo total (taxa de atraso ajustável + buffer realista de 3.0s/chamada)
-    estimated_total_time_s = total_a_revisar * (time_rate_s + 3.0) 
+    # Apenas o que falta revisar
+    remaining_to_review = total_a_revisar - already_processed_count
     
+    # Estimativa de tempo total (apenas para o que falta!)
+    estimated_total_time_s = remaining_to_review * (time_rate_s + 3.0) 
     estimated_minutes = int(estimated_total_time_s // 60)
     estimated_seconds = int(estimated_total_time_s % 60)
     
-    time_estimate_message = f"**Taxa de Atraso:** {time_rate_s}s | **Estimativa Inicial:** Cerca de **{estimated_minutes}m {estimated_seconds}s** para revisar **{total_a_revisar}** parágrafos."
+    time_estimate_message = f"**{already_processed_count}** parágrafos já revisados (Checkpoint). Faltam **{remaining_to_review}** para revisar. **Estimativa:** Cerca de **{estimated_minutes}m {estimated_seconds}s**."
     
-    # MUITO IMPORTANTE: Define a barra de progresso dentro do container
     with status_container:
         st.subheader("Fase 2/3: Revisão e Diagramação do Miolo")
         if is_api_ready:
-            st.info(time_estimate_message) # Exibe a estimativa inicial
+            st.info(time_estimate_message)
         else:
             st.warning("Revisão IA Desativada. Apenas diagramação será executada.")
             
-        # Template focado no Tempo Restante (Contagem Regressiva)
         progress_text_template = "⏳ **Tempo Restante:** {remaining_time} | Progresso: {percent}% ({done}/{total})"
         
-        progress_bar = st.progress(0, text=progress_text_template.format(
-            percent=0, 
-            done=0, 
+        progress_bar = st.progress(already_processed_count / total_a_revisar if total_a_revisar > 0 else 0, text=progress_text_template.format(
+            percent=int(already_processed_count / total_a_revisar * 100) if total_a_revisar > 0 else 0, 
+            done=already_processed_count, 
             total=total_a_revisar, 
-            remaining_time=f"{estimated_minutes}m {estimated_seconds}s" # Exibe a estimativa inicial
+            remaining_time=f"{estimated_minutes}m {estimated_seconds}s"
         ))
-        start_loop_time = time.time() # Inicia o timer do loop
+        start_loop_time = time.time()
     
-    update_interval = max(1, total_a_revisar // 50) # Atualiza no máximo 50 vezes ou a cada 1 parágrafo
+    # Atualiza a cada 50 novos parágrafos revisados ou 1 (o que for maior)
+    update_interval = max(1, remaining_to_review // 50) 
+    newly_reviewed_count = 0
+    current_revisados_total = already_processed_count
 
     for i, paragrafo in enumerate(paragrafos):
         texto_original = paragrafo.text
         texto_completo += texto_original + "\n"
         
         is_revisable = len(texto_original.strip()) >= 10
+        texto_original_stripped = texto_original.strip()
 
-        if is_revisable and is_api_ready:
-            # Passa o delay ajustável
-            texto_revisado = revisar_paragrafo(texto_original, time_rate_s)
-            revisados_count += 1
+        if is_revisable:
+            # --- LÓGICA DE CHECKPOINTING ---
+            if texto_original_stripped in processed_state_map:
+                # O parágrafo foi encontrado no checkpoint: PULA A API
+                texto_revisado = processed_state_map[texto_original_stripped]
+                current_revisados_total = current_revisados_total # Já contado no início
+
+            elif is_api_ready:
+                # O parágrafo NÃO está no checkpoint e a API está pronta: CHAMA A API
+                texto_revisado = revisar_paragrafo(texto_original, time_rate_s)
+                
+                # Armazena o novo resultado no estado para o próximo checkpoint
+                st.session_state['processed_state'][texto_original_stripped] = texto_revisado
+                newly_reviewed_count += 1
+                current_revisados_total += 1
+            else:
+                # O parágrafo NÃO está no checkpoint, mas a API está indisponível:
+                texto_revisado = texto_original
+                
         else:
             texto_revisado = texto_original
         
-        # Cria o novo parágrafo no documento (Mantido)
+        # Cria o novo parágrafo no documento 
         novo_paragrafo = documento_revisado.add_paragraph(texto_revisado)
         
-        # Lógica de títulos e quebras (Mantida)
-        if len(texto_original.strip()) > 0 and (
-            texto_original.strip().lower().startswith("capítulo") or
-            texto_original.strip().lower().startswith("introdução") or
-            texto_original.strip().lower().startswith("prólogo") or
-            texto_original.strip().lower().startswith("conclusão")
+        # Lógica de títulos e quebras 
+        if len(texto_original_stripped) > 0 and (
+            texto_original_stripped.lower().startswith("capítulo") or
+            texto_original_stripped.lower().startswith("introdução") or
+            texto_original_stripped.lower().startswith("prólogo") or
+            texto_original_stripped.lower().startswith("conclusão")
         ):
             if i > 0:
                 documento_revisado.add_page_break()
-                
+            # Marca o título para o sumário automático do Word/Google Docs
             novo_paragrafo.style = 'Heading 1' 
             novo_paragrafo.alignment = WD_ALIGN_PARAGRAPH.CENTER
             novo_paragrafo.runs[0].font.size = Pt(18) 
@@ -455,25 +434,22 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
         else:
             novo_paragrafo.style = 'Normal'
 
-        # --- LÓGICA DE ATUALIZAÇÃO DO PROGRESSO COM TEMPO (CRONÔMETRO) ---
-        if is_revisable and is_api_ready and (revisados_count % update_interval == 0 or revisados_count == total_a_revisar):
-            percent_complete = int(revisados_count / total_a_revisar * 100)
+        # --- LÓGICA DE ATUALIZAÇÃO DO PROGRESSO ---
+        # Atualiza a barra de progresso em intervalos gerenciáveis
+        if is_revisable and is_api_ready and newly_reviewed_count > 0 and newly_reviewed_count % update_interval == 0:
+            
+            percent_complete = int(current_revisados_total / total_a_revisar * 100)
             elapsed_time = time.time() - start_loop_time
             
-            # Cálculo do tempo restante baseado na taxa de conclusão até agora
-            if elapsed_time > 0 and revisados_count > 0:
-                avg_time_per_revised = elapsed_time / revisados_count
-                remaining_revised = total_a_revisar - revisados_count
-                remaining_time_s = remaining_revised * avg_time_per_revised
+            if elapsed_time > 0 and newly_reviewed_count > 0:
+                # Calcula a taxa baseada apenas no tempo gasto e nos novos parágrafos
+                avg_time_per_newly_reviewed = elapsed_time / newly_reviewed_count
+                # O tempo restante é calculado com base nos *restantes* a serem revisados pela IA
+                remaining_time_s = (total_a_revisar - current_revisados_total) * avg_time_per_newly_reviewed
                 
                 remaining_minutes = int(remaining_time_s // 60)
                 remaining_seconds = int(remaining_time_s % 60)
-                
-                # Garante que o tempo restante não é negativo
-                if remaining_time_s < 0:
-                     remaining_time_str = "Concluindo..."
-                else:
-                    remaining_time_str = f"{remaining_minutes}m {remaining_seconds}s"
+                remaining_time_str = f"{remaining_minutes}m {remaining_seconds}s"
             else:
                 remaining_time_str = "Calculando..."
 
@@ -481,21 +457,23 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
                 percent_complete, 
                 text=progress_text_template.format(
                     percent=percent_complete, 
-                    done=revisados_count, 
+                    done=current_revisados_total, 
                     total=total_a_revisar, 
                     remaining_time=remaining_time_str
                 )
             )
 
-    # Após o loop, limpa a barra de progresso e mostra o sucesso.
+    # Após o loop
     end_loop_time = time.time()
     total_loop_duration = round(end_loop_time - start_loop_time, 1)
 
     with status_container:
-        progress_bar.empty() # Limpa a barra
-        st.success(f"Fase 2/3 concluída: Miolo revisado e diagramado em **{total_loop_duration}s**! 🎉")
+        progress_bar.empty()
+        st.success(f"Fase 2/3 concluída: Miolo processado em **{total_loop_duration}s**! 🎉 Total de parágrafos revisados pela IA nesta rodada: **{newly_reviewed_count}**.")
 
-    # --- 5. Inserção da Página Pós-Textual (Mantido) ---
+    
+    # --- 4. Inserção da Página Pós-Textual ---
+    
     documento_revisado.add_page_break()
     try:
         about_author_text_full = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[1].strip()
@@ -513,12 +491,11 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
         adicionar_pagina_generica(documento_revisado, "Apêndice A", "Título do Apêndice")
         adicionar_pagina_generica(documento_revisado, "Anexo I", "Título do Anexo")
 
-    # --- 6. Geração do Blurb de Marketing (Fase 3) ---
+    # --- 5. Geração do Blurb de Marketing (Fase 3) ---
     with status_container:
         st.subheader("Fase 3/3: Geração de Elementos de Marketing")
 
     if is_api_ready:
-        # Usa o novo wrapper de tempo
         blurb_gerado, duration = run_fast_process_with_timer(
             "Geração do Blurb de Marketing (Contracapa)",
             gerar_conteudo_marketing,
@@ -533,7 +510,7 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
         
     return documento_revisado, texto_completo, blurb_gerado
 
-# --- INICIALIZAÇÃO DE ESTADO (Mantido) ---
+# --- INICIALIZAÇÃO DE ESTADO (Com processed_state) ---
 if 'book_title' not in st.session_state:
     st.session_state['book_title'] = "O Último Código de Honra"
     st.session_state['book_author'] = "Carlos Honorato"
@@ -549,20 +526,39 @@ if 'book_title' not in st.session_state:
     st.session_state['incluir_indices_abnt'] = False
     if 'style_option' not in st.session_state:
         st.session_state['style_option'] = "Romance Clássico (Garamond)" 
-    # Novo estado para a taxa de tempo (Default 0.2s)
     if 'time_rate_s' not in st.session_state:
         st.session_state['time_rate_s'] = 0.2
+    # NOVO: Estado de Checkpoint - Mapeia texto original -> texto revisado
+    # Este dicionário guarda o progresso revisado.
+    st.session_state['processed_state'] = {} 
 
-# --- CÁLCULOS DINÂMICOS (Mantidos) ---
+# --- CÁLCULOS DINÂMICOS ---
 format_option_default = "Padrão A5 (5.83x8.27 in)"
 selected_format_data_calc = KDP_SIZES.get(st.session_state.get('format_option', format_option_default), KDP_SIZES[format_option_default])
 
 espessura_cm = round(st.session_state['page_count'] * selected_format_data_calc['papel_fator'], 2) 
-capa_largura_total_cm = round((selected_format_data_calc['width_cm'] * 2) + espessura_cm + 0.6, 2)
+# Adiciona 0.6cm de sangria (0.3cm de cada lado)
+capa_largura_total_cm = round((selected_format_data_calc['width_cm'] * 2) + espessura_cm + 0.6, 2) 
 capa_altura_total_cm = round(selected_format_data_calc['height_cm'] + 0.6, 2)
 # --- FIM CÁLCULOS DINÂMICOS ---
 
-# --- FLUXO PRINCIPAL DO APLICATIVO (Tabs - Mantido) ---
+# --- FUNÇÃO PARA CARREGAR CHECKPOINT ---
+def load_checkpoint_from_json(uploaded_json):
+    """Lê o arquivo JSON e carrega o estado de volta para a sessão."""
+    try:
+        bytes_data = uploaded_json.read()
+        data = json.loads(bytes_data.decode('utf-8'))
+        
+        if isinstance(data, dict):
+            st.session_state['processed_state'] = data
+            st.success(f"Checkpoint carregado com sucesso! **{len(data)}** parágrafos revisados restaurados.")
+        else:
+            st.error("Formato JSON inválido. O arquivo deve conter um objeto (dicionário).")
+    except Exception as e:
+        st.error(f"Erro ao ler ou processar o arquivo JSON de checkpoint: {e}")
+
+
+# --- FLUXO PRINCIPAL DO APLICATIVO (Tabs) ---
 
 config_tab, miolo_tab, capa_tab, export_tab = st.tabs([
     "1. Configuração Inicial", 
@@ -571,7 +567,7 @@ config_tab, miolo_tab, capa_tab, export_tab = st.tabs([
     "4. Análise & Exportar"
 ])
 
-# --- TAB 1: CONFIGURAÇÃO INICIAL (Atualizada com Slider de Taxa) ---
+# --- TAB 1: CONFIGURAÇÃO INICIAL (Com Upload de Checkpoint) ---
 
 with config_tab:
     st.header("Dados Essenciais para o Projeto")
@@ -579,7 +575,7 @@ with config_tab:
     col1, col2 = st.columns(2)
     with col1:
         st.session_state['book_title'] = st.text_input("Título do Livro", st.session_state['book_title'])
-        st.session_state['page_count'] = st.number_input("Contagem Aproximada de Páginas (Miolo)", min_value=10, value=st.session_state['page_count'], step=10, help="Crucial para o cálculo exato da lombada. O arquivo DOCX será padronizado para esta contagem.")
+        st.session_state['page_count'] = st.number_input("Contagem Aproximada de Páginas (Miolo)", min_value=10, value=st.session_state['page_count'], step=10)
     with col2:
         st.session_state['book_author'] = st.text_input("Nome do Autor", st.session_state['book_author'])
         
@@ -603,7 +599,6 @@ with config_tab:
             options=list(STYLE_TEMPLATES.keys()),
             index=list(STYLE_TEMPLATES.keys()).index(current_style_key), 
             key='style_option', 
-            help="Define fonte, tamanho e espaçamento (Ex: ABNT para trabalhos acadêmicos)."
         )
         selected_style_data = STYLE_TEMPLATES[style_option]
         
@@ -612,7 +607,6 @@ with config_tab:
             "Incluir Índices/Apêndices ABNT", 
             value=st.session_state['incluir_indices_abnt'], 
             key='incluir_indices_abnt_checkbox', 
-            help="Adiciona placeholders para Sumário, Índice de Tabelas, Apêndices e Anexos."
         )
         st.session_state['incluir_indices_abnt'] = incluir_indices_abnt 
         
@@ -626,18 +620,29 @@ with config_tab:
         help="Controla a velocidade da revisão IA para evitar o limite de taxa (Rate Limit) da OpenAI. Use uma taxa mais alta (ex: 0.5s) para manuscritos longos."
     )
         
-    st.subheader("Upload do Manuscrito")
+    st.subheader("Upload e Checkpoint")
     uploaded_file = st.file_uploader(
         "Carregue o arquivo .docx do seu manuscrito:", 
         type=['docx'],
-        help="O processamento de arquivos grandes pode levar alguns minutos. Recomendamos salvar a cada etapa."
     )
     st.session_state['uploaded_file'] = uploaded_file
 
-    st.info(f"**Cálculo da Lombada (Spine):** **{espessura_cm} cm**. **Dimensão Total da Capa (com sangria 0.3cm):** **{capa_largura_total_cm} cm x {capa_altura_total_cm} cm**. Esses dados serão usados para a Capa IA.")
+    # --- LÓGICA DE UPLOAD DE CHECKPOINT ---
+    checkpoint_file = st.file_uploader(
+        "⬆️ Carregar Checkpoint Anterior (.json):", 
+        type=['json'],
+        help="Carregue o arquivo JSON de estado para continuar uma revisão interrompida. Isso definirá o ponto de reinício. **ATENÇÃO:** O nome do arquivo DOCX deve ser o mesmo do processamento anterior."
+    )
+    
+    if checkpoint_file is not None:
+        load_checkpoint_from_json(checkpoint_file)
+        
+    st.info(f"**Status do Checkpoint:** **{len(st.session_state['processed_state'])}** parágrafos revisados em memória.")
+    
+    st.info(f"**Cálculo da Lombada (Spine):** **{espessura_cm} cm**. **Dimensão Total da Capa (com sangria 0.3cm):** **{capa_largura_total_cm} cm x {capa_altura_total_cm} cm**.")
 
 
-# --- TAB 2: DIAGRAMAÇÃO & ELEMENTOS (Atualizado) ---
+# --- TAB 2: DIAGRAMAÇÃO & ELEMENTOS ---
 
 with miolo_tab:
     st.header("Fluxo de Diagramação e Revisão com IA")
@@ -647,12 +652,11 @@ with miolo_tab:
     if uploaded_file is None:
         st.warning("Por favor, carregue um arquivo .docx na aba **'1. Configuração Inicial'** para começar.")
     else:
-        # Container para mensagens de status e barra de progresso
         status_container = st.container() 
         
         if st.button("▶️ Iniciar Processamento do Miolo (Diagramação e Revisão)"):
-            if not is_api_ready:
-                st.error("Atenção: As chaves OpenAI não estão configuradas. Apenas a diagramação do miolo será realizada. A revisão da IA será ignorada.")
+            if not is_api_ready and len(st.session_state['processed_state']) == 0:
+                 st.error("Atenção: A revisão IA está desativada e nenhum Checkpoint foi carregado. Apenas a diagramação será realizada.")
             
             with status_container:
                 st.info("Processamento iniciado! Acompanhe o progresso abaixo...")
@@ -661,7 +665,6 @@ with miolo_tab:
             current_style_key = st.session_state.get('style_option', "Romance Clássico (Garamond)")
             selected_style_data = STYLE_TEMPLATES[current_style_key] 
             
-            # Reseta o ponteiro do arquivo para o início antes de processar
             uploaded_file.seek(0)
             documento_revisado, texto_completo, blurb_gerado = processar_manuscrito(
                 uploaded_file, 
@@ -669,15 +672,14 @@ with miolo_tab:
                 selected_style_data, 
                 st.session_state['incluir_indices_abnt'], 
                 status_container,
-                st.session_state['time_rate_s'] # Passa a taxa ajustável
+                st.session_state['time_rate_s']
             )
             
-            # Armazena resultados no state
             st.session_state['documento_revisado'] = documento_revisado
             st.session_state['texto_completo'] = texto_completo
             st.session_state['blurb'] = blurb_gerado 
             
-            # Limpa relatórios anteriores
+            # Limpa relatórios anteriores para forçar a regeração se necessário
             st.session_state['relatorio_estrutural'] = ""
             st.session_state['relatorio_kdp'] = ""
             st.session_state['generated_image_url'] = None
@@ -690,12 +692,11 @@ with miolo_tab:
             st.success(f"Miolo diagramado no formato **{st.session_state['format_option']}** com o estilo **'{selected_style_data['font_name']}**'.")
             
             st.subheader("Intervenção: Blurb da Contracapa")
-            st.warning("O Blurb abaixo será usado no design da Capa Completa e no relatório de análise. **Edite-o** antes de gerar a capa.")
+            st.warning("O Blurb abaixo será usado no design da Capa Completa. **Edite-o** antes de gerar a capa.")
             st.session_state['blurb'] = st.text_area("Texto de Vendas (Blurb):", st.session_state['blurb'], height=300, key='blurb_text_area')
 
 
-# --- TAB 3: CAPA COMPLETA IA (Atualizado) ---
-
+# --- TAB 3: CAPA COMPLETA IA ---
 with capa_tab:
     st.header("Criação da Capa Completa (Frente, Lombada e Verso)")
     
@@ -724,7 +725,6 @@ with capa_tab:
             if not is_api_ready:
                 st.error("Chaves OpenAI não configuradas. Não é possível gerar a imagem.")
             else:
-                # Usa o novo wrapper de tempo
                 image_output, duration = run_fast_process_with_timer(
                     "Geração do Design de Capa Completa (DALL-E 3)",
                     gerar_capa_ia_completa,
@@ -741,15 +741,14 @@ with capa_tab:
                     st.session_state['generated_image_url'] = image_output
                     st.toast("Capa Gerada!", icon="✅")
                 else:
-                    st.error(image_output) # Exibe o erro retornado pela função
+                    st.error(image_output)
 
         if st.session_state['generated_image_url']:
             st.subheader("Pré-visualização da Capa Gerada")
             st.image(st.session_state['generated_image_url'], caption="Capa Completa (Frente, Lombada e Verso)", use_column_width=True)
-            st.info("Lembre-se: Esta é uma imagem do design. As dimensões exatas de impressão estão na aba **'Exportar'**.")
 
 
-# --- TAB 4: ANÁLISE & EXPORTAR (Atualizado) ---
+# --- TAB 4: ANÁLISE & EXPORTAR (Com Download de Checkpoint) ---
 
 with export_tab:
     st.header("Relatórios Finais e Exportação")
@@ -758,37 +757,21 @@ with export_tab:
         st.warning("Por favor, execute o processamento do Miolo (Aba 2) antes de exportar.")
     else:
 
-        # --- Relatório Estrutural ---
-        st.subheader("1. Relatório Estrutural (Editor-Chefe)")
-        if is_api_ready:
-            
-            if st.button("Gerar/Atualizar Relatório Estrutural"):
-                # Usa o novo wrapper de tempo
+        # --- Relatórios ---
+        st.subheader("1. Relatórios de Análise")
+        
+        col_rel1, col_rel2 = st.columns(2)
+        with col_rel1:
+            if is_api_ready and st.button("Gerar/Atualizar Relatório Estrutural"):
                 relatorio, duration = run_fast_process_with_timer(
                     "Geração do Relatório Estrutural",
                     gerar_relatorio_estrutural,
                     st.session_state['texto_completo']
                 )
                 st.session_state['relatorio_estrutural'] = relatorio
-                
-                if "[ERRO DE CONEXÃO DA API]" not in relatorio:
-                    st.toast("Relatório Estrutural gerado!", icon="✅")
             
-            if st.session_state.get('relatorio_estrutural') and "[ERRO DE CONEXÃO DA API]" not in st.session_state['relatorio_estrutural']:
-                st.markdown(st.session_state['relatorio_estrutural'])
-            elif st.session_state.get('relatorio_estrutural'):
-                st.error(st.session_state['relatorio_estrutural']) 
-            else:
-                st.info("Clique no botão acima para gerar o Relatório Estrutural.")
-
-        else:
-            st.warning("Relatório Estrutural não gerado. Conecte a API para receber o feedback do Editor-Chefe.")
-        
-        # --- Relatório KDP/Técnico ---
-        st.subheader("2. Relatório Técnico e de Conformidade KDP")
-        if st.button("Gerar/Atualizar Relatório Técnico KDP"):
-            if is_api_ready:
-                # Usa o novo wrapper de tempo
+        with col_rel2:
+            if is_api_ready and st.button("Gerar/Atualizar Relatório Técnico KDP"):
                 relatorio, duration = run_fast_process_with_timer(
                     "Geração do Relatório Técnico KDP",
                     gerar_relatorio_conformidade_kdp,
@@ -801,59 +784,66 @@ with export_tab:
                     capa_altura_total_cm
                 )
                 st.session_state['relatorio_kdp'] = relatorio
-            else:
-                st.error("Chaves OpenAI não configuradas. Não é possível gerar relatórios.")
 
-        if 'relatorio_kdp' in st.session_state and st.session_state['relatorio_kdp']:
-            if "[ERRO DE CONEXÃO DA API]" not in st.session_state['relatorio_kdp']:
-                st.markdown(st.session_state['relatorio_kdp'])
-            else:
-                st.error(st.session_state['relatorio_kdp'])
-        else:
-            st.info("Clique no botão acima para gerar o checklist de publicação KDP.")
+        if st.session_state.get('relatorio_estrutural'):
+            st.markdown("### Relatório Estrutural:")
+            st.markdown(st.session_state['relatorio_estrutural'])
+        
+        if st.session_state.get('relatorio_kdp'):
+            st.markdown("### Relatório Técnico KDP:")
+            st.markdown(st.session_state['relatorio_kdp'])
 
+        # --- Exportação de Arquivos ---
+        st.subheader("2. Exportação de Arquivos Finais")
 
-        # --- Exportação de Arquivos (Mantido) ---
-        st.subheader("3. Exportação de Arquivos Finais")
-
-        # Função auxiliar para preparar o DOCX para download
         def to_docx_bytes(document):
             file_stream = BytesIO()
             document.save(file_stream)
             file_stream.seek(0)
             return file_stream.read()
 
-        # Prepara o DOCX para download
         docx_bytes = to_docx_bytes(st.session_state['documento_revisado'])
         
-        col_dl1, col_dl2 = st.columns(2)
+        col_dl1, col_dl2, col_dl3 = st.columns(3)
 
         with col_dl1:
             st.download_button(
-                label="⬇️ Baixar Miolo DOCX (Pronto para KDP/Gráfica)",
+                label="⬇️ Baixar Miolo DOCX",
                 data=docx_bytes,
                 file_name=f"{st.session_state['book_title']}_Miolo_Diagramado.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
 
-        # Capa Export
         if st.session_state['generated_image_url']:
             try:
-                # Baixar a imagem da URL para permitir o download no Streamlit
+                # O requests.get é necessário para baixar a URL externa da imagem gerada pelo DALL-E
                 image_response = requests.get(st.session_state['generated_image_url'])
                 image_bytes = BytesIO(image_response.content).read()
                 
                 with col_dl2:
                     st.download_button(
-                        label="⬇️ Baixar Arte da Capa Completa (PNG/JPG)",
+                        label="⬇️ Baixar Arte da Capa Completa",
                         data=image_bytes,
-                        file_name=f"{st.session_state['book_title']}_Capa_Completa_{capa_largura_total_cm}x{capa_altura_total_cm}cm.jpg",
+                        file_name=f"{st.session_state['book_title']}_Capa_Completa.jpg",
                         mime="image/jpeg" 
                     )
-                st.success(f"Capa Completa gerada e pronta para download! Dimensões Físicas: **{capa_largura_total_cm} cm x {capa_altura_total_cm} cm**.")
-            except Exception as e:
+            except Exception:
                 with col_dl2:
-                    st.error(f"Erro ao preparar o download da capa: {e}. Tente gerar a capa novamente.")
+                    st.warning("Capa gerada, mas houve erro no download. Tente novamente.")
         else:
             with col_dl2:
-                 st.warning("Gere a capa na aba '3. Capa Completa IA' para baixar a arte.")
+                 st.warning("Capa indisponível.")
+                 
+        # --- LÓGICA DE DOWNLOAD DO CHECKPOINT ---
+        
+        processed_json = json.dumps(st.session_state['processed_state'], indent=4, ensure_ascii=False)
+        processed_bytes = processed_json.encode('utf-8')
+        
+        with col_dl3:
+            st.download_button(
+                label="💾 Baixar Checkpoint (JSON)",
+                data=processed_bytes,
+                file_name=f"{st.session_state['book_title']}_CHECKPOINT.json",
+                mime="application/json",
+                help=f"Baixe este arquivo para salvar o progresso de {len(st.session_state['processed_state'])} parágrafos revisados."
+            )
