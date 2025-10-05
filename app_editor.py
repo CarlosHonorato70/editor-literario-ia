@@ -10,7 +10,7 @@ from docx.enum.section import WD_SECTION
 from docx.enum.section import WD_ORIENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
-from docx.section import Section, _HeaderFooter
+# Linha corrigida: Removido o import problemático de docx.section
 import requests 
 import time 
 from typing import Optional, Dict, Tuple, Any, List
@@ -57,6 +57,9 @@ def init_state():
         st.session_state['system_prompt'] = "Você é um autor de best-sellers. Seu trabalho é escrever o próximo capítulo de um livro de {genre} intitulado '{title}', seguindo as diretrizes de escrita de {voice}. Mantenha o tom da narrativa consistente e desenvolva a trama a partir do ponto em que parou. O capítulo deve ter cerca de 1000 a 1500 palavras."
     if 'custom_cover_image_bytes' not in st.session_state:
         st.session_state['custom_cover_image_bytes'] = None
+    if 'book_author' not in st.session_state:
+        st.session_state['book_author'] = "Autor Desconhecido"
+
 
 # --- FUNÇÕES DE CONEXÃO E LLM ---
 
@@ -91,7 +94,10 @@ def generate_text_content(prompt: str, client: OpenAI, voice: str, title: str, g
     if previous_chapters:
         # Adiciona o conteúdo dos últimos 3 capítulos para contexto, se existirem
         for chapter in previous_chapters[-3:]:
-            messages.append({"role": "assistant", "content": f"Capítulo {chapter['chapter_number']}: {chapter['content'][:500]}..."}) # Limita o contexto
+            # Usando o nome do capítulo como título para o modelo
+            chap_title = f"Capítulo {chapter['chapter_number']}: {chapter['chapter_title']}"
+            # Limita o contexto para não exceder o limite de tokens
+            messages.append({"role": "assistant", "content": f"{chap_title}\n\n{chapter['content'][:500]}..."}) 
     
     messages.append({"role": "user", "content": prompt})
 
@@ -165,12 +171,19 @@ def generate_book_summary(client: OpenAI, title: str, genre: str, chapters: List
 
 # --- FUNÇÕES DOCX (INCLUINDO NUMERAÇÃO DE PÁGINAS E SUMÁRIO) ---
 
-def create_page_number_footer(section: Section, page_num_start: int):
-    """Adiciona a numeração de página ao rodapé da seção, começando em um número específico."""
+def create_page_number_footer(section: Any, page_num_start: int):
+    """
+    Adiciona a numeração de página ao rodapé da seção, começando em um número específico.
+    O parâmetro 'section' é do tipo docx.section.Section (usando Any para evitar o ImportError).
+    """
     footer = section.footer
     
     # Cria o parágrafo de numeração no rodapé
-    paragraph = footer.paragraphs[0]
+    if not footer.paragraphs:
+         paragraph = footer.add_paragraph()
+    else:
+         paragraph = footer.paragraphs[0]
+
     paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
     # Adiciona a numeração de página (campo PAGE)
@@ -199,14 +212,7 @@ def create_page_number_footer(section: Section, page_num_start: int):
     pgNumType.set(qn('w:start'), str(page_num_start))
     sect_pr.append(pgNumType)
 
-def set_section_orientation(section: Section, orientation: WD_ORIENT):
-    """Configura a orientação da seção (usado para garantir quebras limpas)."""
-    section.orientation = orientation
-    new_width, new_height = section.page_height, section.page_width
-    section.page_width = new_width
-    section.page_height = new_height
-
-def export_docx(chapters: List[Dict[str, Any]], title: str, size_key: str, custom_cover_bytes: Optional[bytes], generated_image_url: Optional[str]) -> Tuple[bytes, str]:
+def export_docx(chapters: List[Dict[str, Any]], title: str, author: str, size_key: str, custom_cover_bytes: Optional[bytes], generated_image_url: Optional[str]) -> Tuple[bytes, str]:
     """Cria e salva o documento DOCX com numeração e sumário."""
     if not chapters:
         raise ValueError("Nenhum capítulo encontrado para exportação.")
@@ -215,11 +221,11 @@ def export_docx(chapters: List[Dict[str, Any]], title: str, size_key: str, custo
     size_config = KDP_SIZES.get(size_key, KDP_SIZES["Padrão EUA (6x9 in)"])
     
     # 1. ESTILOS BASE E TAMANHO DE PÁGINA
-    
-    # Define o tamanho de página no Word (KDP/Gráfica)
-    section = doc.sections[0]
-    section.page_width = Inches(size_config['width_in'])
-    section.page_height = Inches(size_config['height_in'])
+
+    # Define o tamanho de página no Word (KDP/Gráfica) na seção inicial
+    section_config = doc.sections[0]
+    section_config.page_width = Inches(size_config['width_in'])
+    section_config.page_height = Inches(size_config['height_in'])
     
     # Estilo base
     style = doc.styles['Normal']
@@ -232,43 +238,40 @@ def export_docx(chapters: List[Dict[str, Any]], title: str, size_key: str, custo
     h1_font = h1_style.font
     h1_font.size = Pt(18)
     h1_font.name = 'Georgia'
+    h1_style.paragraph_format.space_before = Pt(40)
+    h1_style.paragraph_format.space_after = Pt(20)
 
     # --- INÍCIO DO CONTEÚDO ---
     
     # PÁGINA 1: CAPA
+    cover_image_bytes = None
     if custom_cover_bytes:
         cover_image_bytes = custom_cover_bytes
-        image_name = "Capa Externa.jpg"
     elif generated_image_url:
         try:
             response = requests.get(generated_image_url, timeout=10)
-            response.raise_for_status() # Lança exceção para erros HTTP
+            response.raise_for_status() 
             cover_image_bytes = BytesIO(response.content).read()
-            image_name = "Capa Gerada IA.jpg"
-        except Exception as e:
-            st.warning(f"Não foi possível baixar a capa gerada para inclusão no DOCX: {e}. Usando apenas texto.")
-            cover_image_bytes = None
-    else:
-        cover_image_bytes = None
+        except Exception:
+            pass # Ignora se não conseguir baixar a capa gerada
 
-    # Quebra de Seção para isolar a Capa (não numerada)
+    # Seção 0: Capa (Sem numeração)
+    current_section = doc.sections[0]
+    # Certifica-se de que a capa não tem cabeçalho/rodapé ligados à próxima seção
+    current_section.header.is_linked_to_previous = False
+    current_section.footer.is_linked_to_previous = False
+
     if cover_image_bytes:
-        # Pág. 1: Capa (toda a página)
-        doc.sections[0].header.is_linked_to_previous = True
-        doc.sections[0].footer.is_linked_to_previous = True
-        
-        # Inserir imagem de capa (redimensionada para preencher a página)
+        # Pág. 1: Capa (com imagem)
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        # Salva o arquivo temporário para inserir a imagem
         img_stream = BytesIO(cover_image_bytes)
         run = p.add_run()
         
-        # Cálculo para preencher a página sem distorção (simplesmente forçando a largura)
-        run.add_picture(img_stream, width=Inches(size_config['width_in']), height=Inches(size_config['height_in']))
-        
-        # Quebra de página
+        # Insere a imagem, ajustando para o tamanho da página.
+        # Usa um fator de 90% para margem de erro.
+        run.add_picture(img_stream, width=Inches(size_config['width_in'] * 0.9), height=Inches(size_config['height_in'] * 0.9))
         doc.add_page_break()
     else:
         # Pág. 1: Capa (somente texto)
@@ -277,81 +280,68 @@ def export_docx(chapters: List[Dict[str, Any]], title: str, size_key: str, custo
         run = p.add_run(f"\n\n\n{title.upper()}\n\n")
         run.font.size = Pt(36)
         run.bold = True
+        doc.add_paragraph(author)
         doc.add_page_break()
     
-    # Quebra de Seção 1 (Miolo): Começa a contagem de páginas, mas oculta a numeração na Pág. 2
-    # A numeração lógica do livro deve começar aqui, mas a numeração *física* visível deve começar mais tarde.
     
-    # Adiciona a quebra de seção (necessária para resetar ou configurar a numeração)
+    # Quebra de Seção 1 (Front Matter): Título, Direitos, Sumário
+    # Esta seção começa a contagem interna, mas não exibe o rodapé.
     doc.add_section(WD_SECTION.NEW_PAGE)
+    current_section = doc.sections[-1]
+    current_section.header.is_linked_to_previous = False
+    current_section.footer.is_linked_to_previous = False
     
     # 2. PÁGINA DE TÍTULO (Pág. 2)
     p = doc.add_paragraph(title)
     p.style = 'Title'
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Inches(2)
+    doc.add_paragraph(author, style='Subtitle').alignment = WD_ALIGN_PARAGRAPH.CENTER
     doc.add_page_break()
     
     # 3. PÁGINA DE DIREITOS AUTORAIS/DEDICATÓRIA (Pág. 3)
-    p = doc.add_paragraph("Direitos Autorais - 2025")
+    p = doc.add_paragraph("Direitos Autorais - Todos os direitos reservados.")
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     doc.add_page_break()
 
     # 4. SUMÁRIO (Pág. 4)
-    doc.add_heading("Sumário", level=1)
+    doc.add_heading("Sumário", level=1).alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    # Simula as páginas onde o conteúdo real começa (após Capa, Título, Direitos, Sumário)
-    # Conteúdo real (Capítulo 1) começará na página 5 (ou 4 no índice lógico da Seção 2)
-    current_physical_page = 4 
+    # INSERÇÃO DO CAMPO TOC (Requer atualização manual no Word)
+    paragraph = doc.add_paragraph()
+    run = paragraph.add_run()
+    fldChar = OxmlElement('w:fldChar')
+    fldChar.set(qn('w:fldCharType'), 'begin')
+    run._element.append(fldChar)
     
-    # TOC Estático - Simulação de Numeração (apenas para fins de alinhamento)
+    run = doc.add_paragraph().add_run()
+    instrText = OxmlElement('w:instrText')
+    instrText.set(qn('xml:space'), 'preserve')
+    # O código \o "1-3" garante que ele pegue os níveis de 1 a 3
+    instrText.text = 'TOC \\o "1-3" \\h \\z \\u' 
+    run._element.append(instrText)
+
+    run = doc.add_paragraph().add_run()
+    fldChar = OxmlElement('w:fldChar')
+    fldChar.set(qn('w:fldCharType'), 'end')
+    run._element.append(fldChar)
     
-    toc_data = []
-    # Estima o número de páginas por capítulo (muito simplificado: 4500 caracteres/página)
-    CHARS_PER_PAGE = 4500
-    
-    # Páginas de conteúdo real, começando após o Sumário (Pág. 4)
-    content_page_counter = current_physical_page + 1 
-    
-    for idx, chapter in enumerate(chapters):
-        chapter_title = f"Capítulo {chapter['chapter_number']}: {chapter['chapter_title']}"
-        # Estima quantas páginas o capítulo ocupará
-        pages_estimate = math.ceil(len(chapter['content']) / CHARS_PER_PAGE) if len(chapter['content']) > 0 else 1
-        
-        toc_data.append({
-            'title': chapter_title, 
-            'page_num': content_page_counter
-        })
-        content_page_counter += pages_estimate 
-    
-    # Cria o TOC estático
-    for item in toc_data:
-        p = doc.add_paragraph()
-        run = p.add_run(item['title'])
-        run.font.size = Pt(12)
-        
-        # Adiciona os pontos de preenchimento e o número de página alinhado à direita
-        p.add_run(" " * (120 - len(item['title'])) + str(item['page_num'])) # Alinhamento manual simples
-        
-        # Adiciona a formatação de hiperlink (opcional, mas bom para TOC)
-        # Este é um placeholder, pois docx não suporta âncoras facilmente
-        
     doc.add_page_break()
     
-    # 5. CONTEÚDO PRINCIPAL E NUMERAÇÃO DE PÁGINAS
+    # 5. CONTEÚDO PRINCIPAL (Capítulo 1 em diante)
 
-    # Quebra de Seção 2: Onde a numeração de páginas deve se tornar visível e iniciar em '1' ou '5' (se for numeração física)
+    # Quebra de Seção 2: Onde a numeração de páginas deve se tornar visível
     doc.add_section(WD_SECTION.NEW_PAGE) 
     
     # Configura a Seção 2 (Conteúdo)
     content_section = doc.sections[-1]
     
-    # Desliga a ligação com a seção anterior (para que a numeração comece/apareça aqui)
+    # Desliga a ligação com a seção anterior
     content_section.header.is_linked_to_previous = False
     content_section.footer.is_linked_to_previous = False
     
-    # Cria o rodapé com a numeração (o número físico começa no 5, mas a contagem de Word deve começar aqui)
-    # Para o Word, a contagem REAL visível deve começar em 1, mas o documento anterior já conta 4 páginas.
-    # O código abaixo define o rodapé e força a numeração a começar a partir de onde o Word está.
+    # CRÍTICO: Inicia a numeração de página VÍSIVEL em 1
+    # O Word fará a contagem correta a partir desta página, ignorando as seções anteriores.
     create_page_number_footer(content_section, page_num_start=1)
     
     # Insere os capítulos
@@ -364,6 +354,7 @@ def export_docx(chapters: List[Dict[str, Any]], title: str, size_key: str, custo
         # Conteúdo
         p_content = doc.add_paragraph(chapter['content'])
         p_content.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        p_content.paragraph_format.first_line_indent = Inches(0.5)
         
         # Quebra de página no final de cada capítulo, exceto o último
         if idx < len(chapters) - 1:
@@ -439,6 +430,7 @@ with st.sidebar:
     st.header("📚 Detalhes do Livro")
     
     st.session_state['book_title'] = st.text_input("Título do Livro", value=st.session_state['book_title'])
+    st.session_state['book_author'] = st.text_input("Autor", value=st.session_state['book_author'])
     st.session_state['book_genre'] = st.selectbox("Gênero", options=["Ficção", "Não-Ficção", "Aventura", "Romance", "Suspense"], index=0)
     st.session_state['book_voice'] = st.selectbox("Voz Narrativa", options=GENERATION_VOICES, index=0)
     st.session_state['book_size'] = st.selectbox("Formato de Miolo DOCX (KDP)", options=list(KDP_SIZES.keys()), index=0)
@@ -452,8 +444,9 @@ with st.sidebar:
             # Lendo o JSON e atualizando o estado
             data = json.load(uploaded_file)
             st.session_state['processed_state'] = data.get('chapters', [])
-            st.session_state['book_title'] = data.get('title', "Livro Carregado")
-            st.session_state['book_genre'] = data.get('genre', "Ficção")
+            st.session_state['book_title'] = data.get('title', st.session_state['book_title'])
+            st.session_state['book_author'] = data.get('author', st.session_state['book_author'])
+            st.session_state['book_genre'] = data.get('genre', st.session_state['book_genre'])
             st.session_state['generated_image_url'] = data.get('cover_url', None)
             st.success(f"Checkpoint de '{st.session_state['book_title']}' carregado com sucesso! ({len(st.session_state['processed_state'])} capítulos)")
         except Exception as e:
@@ -517,7 +510,7 @@ with tab_generate:
     
     st.divider()
     
-    st.subheader("Conteúdo do Livro")
+    st.subheader("Conteúdo do Livro (Edite Aqui)")
     
     if st.session_state['processed_state']:
         for idx, chapter in enumerate(st.session_state['processed_state']):
@@ -659,6 +652,7 @@ with tab_export:
                 docx_bytes, docx_filename = export_docx(
                     chapters=st.session_state['processed_state'], 
                     title=st.session_state['book_title'],
+                    author=st.session_state['book_author'],
                     size_key=st.session_state['book_size'],
                     custom_cover_bytes=st.session_state['custom_cover_image_bytes'],
                     generated_image_url=st.session_state['generated_image_url']
@@ -671,7 +665,16 @@ with tab_export:
                     file_name=docx_filename,
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
-                st.caption("O arquivo DOCX contém a capa, sumário (TOC) e numeração de página automática no rodapé, começando na primeira página de conteúdo real.")
+                st.markdown("""
+                ---
+                **Atenção ao Sumário:**
+                O arquivo DOCX contém o **campo Sumário (TOC)**. Para que ele mostre a numeração de página correta:
+                1.  Abra o arquivo no Microsoft Word.
+                2.  Clique com o botão direito sobre o texto "Sumário".
+                3.  Selecione **"Atualizar Campo..."** e depois **"Atualizar o índice inteiro"**.
+                
+                A numeração no rodapé já estará visível a partir do Capítulo 1.
+                """)
             except Exception as e:
                 st.error(f"Erro ao preparar o DOCX: {e}. Certifique-se de ter pelo menos 1 capítulo.")
         else:
@@ -683,6 +686,7 @@ with tab_export:
         # Cria um objeto completo do estado atual para salvar (preserva o progresso)
         state_to_save = {
             "title": st.session_state['book_title'],
+            "author": st.session_state['book_author'],
             "genre": st.session_state['book_genre'],
             "size": st.session_state['book_size'],
             "cover_url": st.session_state['generated_image_url'],
