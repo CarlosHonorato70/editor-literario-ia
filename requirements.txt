@@ -1,3 +1,4 @@
 streamlit
 openai
 python-docx
+stqdm==0.0.5
