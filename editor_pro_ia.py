@@ -45,21 +45,27 @@ try:
     # Tenta carregar as chaves do Streamlit Secrets
     if hasattr(st, 'secrets'):
          if API_KEY_NAME in st.secrets and PROJECT_ID_NAME in st.secrets:
-             API_KEY = st.secrets.get(API_KEY_NAME)
+             # Usa .get para evitar KeyError caso a chave exista mas seja None
+             API_KEY = st.secrets.get(API_KEY_NAME) 
              PROJECT_ID = st.secrets.get(PROJECT_ID_NAME)
     
-    # Se as chaves estiverem presentes, inicializa o cliente
+    # Se as chaves estiverem presentes e não forem None/Empty (mesmo que seja a dummy key)
+    # A diferença é que a dummy key falhará na chamada real, mas passará nesta inicialização
     if API_KEY and PROJECT_ID:
+        # Tenta inicializar o cliente. A validação real ocorre na primeira chamada.
         client = OpenAI(api_key=API_KEY, project=PROJECT_ID)
-    else:
+    
+    # Verifica se o cliente foi inicializado, mas pode ainda ter uma chave inválida.
+    is_api_ready = client is not None
+    
+    if not is_api_ready:
         st.warning(f"Chave e ID do Projeto OpenAI não configurados. A revisão e a geração de capa **NÃO** funcionarão. Por favor, adicione '{API_KEY_NAME}' e '{PROJECT_ID_NAME}' no Streamlit Secrets.")
 
 except Exception as e:
-    st.error(f"Erro na inicialização da API: {e}")
+    # Este catch é mais para erros de ambiente do Streamlit, não da API
+    st.error(f"Erro na inicialização do ambiente (secrets). Detalhes: {e}")
     client = None
-
-# Verifica se o cliente foi inicializado com sucesso
-is_api_ready = client is not None
+    is_api_ready = False
 
 
 # --- FUNÇÕES DE AUXÍLIO ---
@@ -84,14 +90,25 @@ def call_openai_api(system_prompt: str, user_content: str, max_tokens: int = 300
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
-            if "Rate limit reached" in str(e) and i < retries - 1:
+            error_msg = str(e)
+            
+            # Tratamento específico para autenticação (401) e Rate Limit (429)
+            if "Invalid API key" in error_msg or "Error code: 401" in error_msg:
+                 # Erro fatal de autenticação, não tenta novamente
+                 st.error(f"ERRO DE AUTENTICAÇÃO: Sua chave de API está incorreta ou expirada. Use uma nova chave. Detalhes: {error_msg}")
+                 return "[ERRO DE CONEXÃO DA API] Chave de API Inválida."
+
+            elif "Rate limit reached" in error_msg or "Error code: 429" in error_msg and i < retries - 1:
+                # Tenta novamente em caso de Rate Limit
                 wait_time = 2 ** i
                 st.warning(f"Limite de taxa atingido. Tentando novamente em {wait_time} segundos... (Tentativa {i+1}/{retries})")
                 time.sleep(wait_time)
             else:
+                # Outros erros (rede, servidor, etc.)
                 st.error(f"Falha ao se comunicar com a OpenAI. Detalhes: {e}")
                 return f"[ERRO DE CONEXÃO DA API] Falha: {e}"
-    return "[ERRO DE CONEXÃO DA API] Tentativas de conexão esgotadas devido a Rate Limit."
+                
+    return "[ERRO DE CONEXÃO DA API] Tentativas de conexão esgotadas devido a Rate Limit ou erro desconhecido."
 
 
 def revisar_paragrafo(paragrafo_texto: str) -> str:
