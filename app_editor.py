@@ -51,10 +51,10 @@ STEP_TITLES: Dict[int, str] = {
     8: "8. Resumo Técnico Final e Downloads",
 }
 
-# Configuração de API (O Streamlit/Canvas injeta a chave automaticamente no fetch)
-GEMINI_MODEL = "gemini-2.5-flash-preview-05-20"
-IMAGEN_MODEL = "imagen-3.0-generate-002"
-API_KEY = "" # Mantido vazio para injeção automática
+# Configuração de API (Agora Referenciando OpenAI)
+GPT_MODEL = "gpt-3.5-turbo" # Modelo de texto simulado (Substitui GEMINI_MODEL)
+DALLE_MODEL = "dall-e-3"    # Modelo de imagem simulado (Substitui IMAGEN_MODEL)
+API_KEY = "" # Mantido vazio para injeção automática (Se necessário, a chave deve ser fornecida pelo usuário)
 
 # --- INICIALIZAÇÃO E GESTÃO DE ESTADO (SESSION STATE) ---
 
@@ -192,14 +192,14 @@ def calculate_spine_thickness(page_count: int, paper_density_name: str, trim_siz
     return round(spine_in_mm, 2)
 
 
-# --- FUNÇÕES DE SIMULAÇÃO DE API (HIGH FIDELITY) ---
+# --- FUNÇÕES DE SIMULAÇÃO DE API (OPENAI/GPT/DALL-E 3) ---
 
 def api_call_with_backoff(system_prompt: str, user_query: str, structured_json: bool = False, max_retries: int = 5) -> Optional[str]:
     """
-    Simula uma chamada de API Gemini estruturada com backoff e tratamento de erros.
+    Simula uma chamada de API GPT (OpenAI) estruturada com backoff e tratamento de erros.
     No código de produção, isso faria um 'fetch' para a API.
     """
-    st.toast("Simulando chamada API Gemini...", icon="🤖")
+    st.toast("Simulando chamada API GPT (OpenAI)...", icon="🤖")
     
     for attempt in range(max_retries):
         try:
@@ -225,7 +225,7 @@ def api_call_with_backoff(system_prompt: str, user_query: str, structured_json: 
                     f"## Relatório {report_type} - Análise Completa\n\n"
                     f"**Título:** {st.session_state.book_title}\n"
                     f"**Data da Análise:** {time.strftime('%Y-%m-%d')}\n\n"
-                    f"**Conclusão da IA (Tentativa {attempt+1}):** O manuscrito apresenta grande potencial. No entanto, o **ritmo narrativo** (conforme solicitado) desacelera no segundo terço da obra. A voz do autor é consistente, mas recomendamos a revisão dos 5 advérbios de modo mais comuns para reduzir vícios de linguagem. "
+                    f"**Conclusão do GPT (Tentativa {attempt+1}):** O manuscrito apresenta grande potencial. No entanto, o **ritmo narrativo** (conforme solicitado) desacelera no segundo terço da obra. A voz do autor é consistente, mas recomendamos a revisão dos 5 advérbios de modo mais comuns para reduzir vícios de linguagem. "
                     f"\n\n---\n\n{user_query[:500]}..." # Inclui um pedaço do texto para contextualizar
                 )
 
@@ -240,8 +240,8 @@ def api_call_with_backoff(system_prompt: str, user_query: str, structured_json: 
                 return None
 
 def dalle_image_generation(prompt_capa: str) -> Optional[str]:
-    """Simula a chamada à API Imagen/DALL-E 3 para gerar imagem de capa."""
-    st.toast("Simulando geração de capa com IA (Imagen/DALL-E 3)...", icon="🖼️")
+    """Simula a chamada à API DALL-E 3 para gerar imagem de capa."""
+    st.toast("Simulando geração de capa com IA (DALL-E 3)...", icon="🖼️")
     
     # Simula o tempo de geração real, que pode ser longo
     time.sleep(5) 
@@ -253,7 +253,7 @@ def dalle_image_generation(prompt_capa: str) -> Optional[str]:
         hex_color = format(hash_color, '06x')
         
         # Placeholder que imita um resultado 2:3 (vertical) para capa
-        image_url = f"https://placehold.co/600x900/{hex_color}/ffffff?text=Capa+Gerada+por+IA"
+        image_url = f"https://placehold.co/600x900/{hex_color}/ffffff?text=Capa+Gerada+por+DALL-E+3"
         st.session_state.generated_image_url = image_url
         st.success("Imagem de capa gerada e salva no estado.")
         return image_url
@@ -331,7 +331,7 @@ def create_front_matter(document: Document):
         "Todos os direitos reservados para esta edição.",
         "\n",
         "Diagramação e Revisão por Editor Literário IA.",
-        f"Design de Capa: Arte Gerada por IA ({st.session_state.report_capa_prompt or 'Não Gerado'})",
+        f"Design de Capa: Arte Gerada por DALL-E 3 ({st.session_state.report_capa_prompt or 'Não Gerado'})",
         f"Formato: {st.session_state.trim_size_name}",
         "ISBN-13: 978-X-XXXX-XXXX-X (Placeholder)",
         "\n",
@@ -435,7 +435,7 @@ def process_manuscript():
             for i, paragrafo_obj in enumerate(paragrafos_para_revisar):
                 indice_absoluto = paragrafo_obj['indice']
                 
-                # Chamada de IA (Simulada)
+                # Chamada de IA (Simulada, agora referenciando GPT)
                 system_prompt_rev = "REVISÃO LITERÁRIA PROFISSIONAL: Otimize clareza, gramática e fluidez, mantendo a voz narrativa."
                 paragrafo_revisado = api_call_with_backoff(system_prompt_rev, paragrafo_obj['texto'])
                 
@@ -491,7 +491,7 @@ def process_manuscript():
     
     texto_para_analise = "\n\n".join([p['texto'] for p in st.session_state.manuscrito_revisado])
     
-    # Passo 4: Relatório Estrutural
+    # Passo 4: Relatório Estrutural (GPT)
     if st.session_state.progress_step == 4 and not st.session_state.report_estrutural:
         system_prompt_4 = f"Relatório Estrutural (Editor-Chefe): Analise o livro '{st.session_state.book_title}' de {st.session_state.author_name}. Avalie o arco narrativo, o ritmo e a coesão geral da trama em 300 palavras."
         st.session_state.report_estrutural = api_call_with_backoff(system_prompt_4, texto_para_analise)
@@ -502,7 +502,7 @@ def process_manuscript():
         else:
             st.warning("Relatório Estrutural falhou.")
             
-    # Passo 5: Relatório de Estilo
+    # Passo 5: Relatório de Estilo (GPT)
     if st.session_state.progress_step == 5 and not st.session_state.report_estilo:
         system_prompt_5 = "Relatório de Estilo (Vícios e Clichês): Analise o texto em busca de repetições, advérbios desnecessários e clichês. Forneça 5 exemplos de melhoria em 300 palavras."
         st.session_state.report_estilo = api_call_with_backoff(system_prompt_5, texto_para_analise)
@@ -513,9 +513,9 @@ def process_manuscript():
         else:
             st.warning("Relatório de Estilo falhou.")
             
-    # Passo 6: Conteúdo de Capa/Contracapa (JSON Estruturado)
+    # Passo 6: Conteúdo de Capa/Contracapa (GPT com JSON Estruturado)
     if st.session_state.progress_step == 6 and not st.session_state.report_capa_blurb:
-        system_prompt_6 = f"Marketing e Capa: Gere um blurb persuasivo (150 palavras) e um prompt de arte visual detalhado para o DALL-E 3/Imagen, representando o clímax. A saída DEVE ser um JSON: {{\"blurb\": \"...\", \"prompt_capa\": \"...\"}}."
+        system_prompt_6 = f"Marketing e Capa: Gere um blurb persuasivo (150 palavras) e um prompt de arte visual detalhado para o DALL-E 3, representando o clímax. A saída DEVE ser um JSON: {{\"blurb\": \"...\", \"prompt_capa\": \"...\"}}."
         json_output = api_call_with_backoff(system_prompt_6, texto_para_analise, structured_json=True)
         
         if json_output:
@@ -533,7 +533,7 @@ def process_manuscript():
         else:
             st.warning("Conteúdo de Marketing falhou.")
             
-    # Passo 7: Criação de Capa (Imagem)
+    # Passo 7: Criação de Capa (DALL-E 3)
     if st.session_state.progress_step == 7 and st.session_state.report_capa_prompt and not st.session_state.generated_image_url:
          dalle_image_generation(st.session_state.report_capa_prompt)
          if st.session_state.generated_image_url:
@@ -679,7 +679,7 @@ with st.expander(STEP_TITLES[6], expanded=(st.session_state.progress_step >= 6))
     if st.session_state.report_capa_blurb:
         st.subheader("📝 Blurb (Texto de Contracapa)")
         st.markdown(st.session_state.report_capa_blurb)
-        st.subheader("🎨 Prompt Visual Detalhado para IA")
+        st.subheader("🎨 Prompt Visual Detalhado para IA (DALL-E 3)")
         st.code(st.session_state.report_capa_prompt, language='text')
     else:
         st.info("Conteúdo de Marketing pendente.")
@@ -688,7 +688,7 @@ with st.expander(STEP_TITLES[6], expanded=(st.session_state.progress_step >= 6))
 with st.expander(STEP_TITLES[7], expanded=(st.session_state.progress_step >= 7)):
     if st.session_state.generated_image_url:
         st.subheader("Prévia da Arte da Capa")
-        st.image(st.session_state.generated_image_url, caption=f"Capa Gerada por IA: {st.session_state.report_capa_prompt[:50]}...")
+        st.image(st.session_state.generated_image_url, caption=f"Capa Gerada por DALL-E 3: {st.session_state.report_capa_prompt[:50]}...")
         # Simulação do download da imagem real (com dados de placeholder)
         st.download_button(
             label="⬇️ Baixar Arte da Capa (Simulação PNG)",
