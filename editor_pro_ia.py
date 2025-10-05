@@ -116,8 +116,13 @@ def revisar_paragrafo(paragrafo_texto: str) -> str:
     system_prompt = "Você é um editor literário. Revise, edite e aprimore o parágrafo. Corrija gramática, aprimore o estilo e garanta a coerência. Retorne *apenas* o parágrafo revisado, sem comentários."
     user_content = f"Parágrafo a ser editado: {paragrafo_texto}"
     texto_revisado = call_openai_api(system_prompt, user_content, max_tokens=500)
+    
     if "[ERRO DE CONEXÃO DA API]" in texto_revisado:
         return paragrafo_texto
+    
+    # *** CORREÇÃO DE ESTABILIDADE FINAL: Atraso de 2 segundos para respeitar o limite de 3 RPM (3 requests / 60 segundos * 20) ***
+    time.sleep(2) 
+    
     return texto_revisado
 
 def gerar_conteudo_marketing(titulo: str, autor: str, texto_completo: str) -> str:
@@ -300,6 +305,8 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
     manuscript_sample = uploaded_file.getvalue().decode('utf-8', errors='ignore')[:5000]
 
     if is_api_ready:
+        # Usa um tempo de espera forçado para evitar Rate Limit na geração inicial
+        time.sleep(2) 
         pre_text_content = gerar_elementos_pre_textuais(st.session_state['book_title'], st.session_state['book_author'], 2025, manuscript_sample)
     else:
         pre_text_content = """
@@ -358,13 +365,14 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
         # A barra só é atualizada a cada 10 parágrafos ou no final
         if (i + 1) % update_interval == 0 or i == total_paragrafos - 1:
             percent_complete = int((i + 1) / total_paragrafos * 100)
-            progress_bar.progress(percent_complete, text=f"Revisando e diagramando o miolo... {percent_complete}%")
+            progress_bar.progress(percent_complete, text=f"Revisando e diagramando o miolo... {percent_complete}% (Aguardando 2s/parágrafo)")
 
         if len(texto_original.strip()) < 10:
             documento_revisado.add_paragraph(texto_original)
             continue 
 
         if is_api_ready:
+            # Esta chamada agora tem o time.sleep(2) dentro de revisar_paragrafo
             texto_revisado = revisar_paragrafo(texto_original)
         else:
             texto_revisado = texto_original # Pula a revisão
@@ -413,6 +421,7 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
         st.info("Fase 3/3: Gerando Blurb de Marketing e preparando para análise...")
     
     if is_api_ready:
+        time.sleep(2) # Mais um atraso para geração do blurb
         blurb_gerado = gerar_conteudo_marketing(st.session_state['book_title'], st.session_state['book_author'], texto_completo)
     else:
         blurb_gerado = "[Blurb não gerado. Conecte a API para um texto de vendas profissional.]"
@@ -594,6 +603,8 @@ with capa_tab:
                 st.error("Chaves OpenAI não configuradas. Não é possível gerar a imagem.")
             else:
                 with st.spinner("Gerando design completo da capa (Frente, Lombada e Verso)... Este processo usa DALL-E 3 e pode levar até um minuto."):
+                    # Tempo de espera adicional para DALL-E 3
+                    time.sleep(5) 
                     image_output = gerar_capa_ia_completa(
                         st.session_state['capa_prompt'],
                         st.session_state['blurb'],
@@ -631,6 +642,7 @@ with export_tab:
             # Condição para evitar re-gerar o relatório desnecessariamente
             if 'relatorio_estrutural' not in st.session_state or st.button("Gerar/Atualizar Relatório Estrutural"):
                  with st.spinner("Analisando ritmo e personagens..."):
+                    time.sleep(2) # Atraso para o Relatório Estrutural
                     # Passa apenas uma amostra do texto completo para economizar tokens
                     relatorio = gerar_relatorio_estrutural(st.session_state['texto_completo'])
                     st.session_state['relatorio_estrutural'] = relatorio
@@ -649,6 +661,7 @@ with export_tab:
         if st.button("Gerar/Atualizar Relatório Técnico KDP"):
             if is_api_ready:
                 with st.spinner("Gerando checklist técnico e de SEO para o upload..."):
+                    time.sleep(2) # Atraso para o Relatório KDP
                     relatorio_kdp = gerar_relatorio_conformidade_kdp(
                         st.session_state['book_title'], st.session_state['book_author'], st.session_state['page_count'], selected_format_data_calc, 
                         espessura_cm, capa_largura_total_cm, capa_altura_total_cm
