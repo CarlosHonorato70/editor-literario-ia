@@ -256,7 +256,7 @@ def gerar_capa_ia_completa(prompt_visual: str, blurb: str, autor: str, titulo: s
         response = client.images.generate(
             model="dall-e-3",
             prompt=full_prompt,
-            size="1792x1024",  # Melhor proporção para capa completa (Horizontal)
+            size="1792x1024", # Melhor proporção para capa completa (Horizontal)
             quality="hd", 
             n=1 
         )
