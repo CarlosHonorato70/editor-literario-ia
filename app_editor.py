@@ -3,10 +3,10 @@ import streamlit as st
 from openai import OpenAI
 from docx import Document
 from io import BytesIO
-from docx.shared import Inches
+from docx.shared import Inches, Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-# --- CONFIGURAÇÃO: DICIONÁRIO DE TAMANHOS KDP (Pol: polegadas / CM: centímetros) ---
-
+# --- CONFIGURAÇÃO 1: DICIONÁRIO DE TAMANHOS KDP (Miolo) ---
 KDP_SIZES = {
     "Padrão EUA (6x9 in)": {"name": "6 x 9 in", "width_in": 6.0, "height_in": 9.0, "width_cm": 15.24, "height_cm": 22.86, "papel_fator": 0.00115},
     "Padrão A5 (5.83x8.27 in)": {"name": "A5 (14.8 x 21 cm)", "width_in": 5.83, "height_in": 8.27, "width_cm": 14.8, "height_cm": 21.0, "papel_fator": 0.00115},
@@ -14,19 +14,23 @@ KDP_SIZES = {
     "Maior (7x10 in)": {"name": "7 x 10 in", "width_in": 7.0, "height_in": 10.0, "width_cm": 17.78, "height_cm": 25.4, "papel_fator": 0.00115},
 }
 
+# --- CONFIGURAÇÃO 2: TEMPLATES DE ESTILO DE DIAGRAMAÇÃO ---
+STYLE_TEMPLATES = {
+    "Romance Clássico (Garamond)": {"font_name": "Garamond", "font_size_pt": 11, "line_spacing": 1.15, "indent": 0.5},
+    "Thriller Moderno (Droid Serif)": {"font_name": "Droid Serif", "font_size_pt": 10, "line_spacing": 1.05, "indent": 0.3},
+    "Não-Ficção (Times New Roman)": {"font_name": "Times New Roman", "font_size_pt": 12, "line_spacing": 1.5, "indent": 0.0},
+}
 
-# --- 0. Configuração e Inicialização ---
+# --- 0. Configuração e Inicialização (Chave OpenAI) ---
 
 st.set_page_config(page_title="Editor Literário IA - Pré-Impressão", layout="wide")
 st.title("📚 Editor Literário com GPT AI")
-st.subheader("Pré-Impressão Completa: Controle Total de Formato e KDP.")
+st.subheader("Pré-Impressão Completa: Editoração Avançada, KDP e Estilo.")
 
-# Nomes das variáveis que o Streamlit irá ler do secrets.toml
 API_KEY_NAME = "OPENAI_API_KEY"
 PROJECT_ID_NAME = "OPENAI_PROJECT_ID"
 MODEL_NAME = "gpt-4o-mini" 
 
-# Configuração da API 
 try:
     API_KEY = None
     PROJECT_ID = None
@@ -37,7 +41,7 @@ try:
              PROJECT_ID = st.secrets[PROJECT_ID_NAME]
     
     if not API_KEY or not PROJECT_ID:
-        st.error(f"ERRO: A Chave da API e o ID do Projeto da OpenAI ({API_KEY_NAME} e {PROJECT_ID_NAME}) não estão configurados corretamente no Secrets.")
+        st.error(f"ERRO: Chave e ID do Projeto OpenAI não configurados. Por favor, adicione '{API_KEY_NAME}' e '{PROJECT_ID_NAME}' no Streamlit Secrets.")
         st.stop()
         
     client = OpenAI(
@@ -50,8 +54,7 @@ except Exception as e:
 
 
 # --- 1. Função de Chamada da API (UNIFICADA) ---
-
-def call_openai_api(system_prompt: str, user_content: str) -> str:
+def call_openai_api(system_prompt: str, user_content: str, max_tokens: int = 3000) -> str:
     """Função genérica para chamar a API da OpenAI."""
     try:
         response = client.chat.completions.create(
@@ -61,120 +64,178 @@ def call_openai_api(system_prompt: str, user_content: str) -> str:
                 {"role": "user", "content": user_content}
             ],
             temperature=0.7,
-            max_tokens=3000
+            max_tokens=max_tokens
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
         return f"[ERRO DE CONEXÃO DA API] Falha ao se comunicar com a OpenAI. Detalhes: {e}"
 
 
-# --- 2. Prompts de Edição e Revisão (Mantidos) ---
-def get_edicao_prompt_system() -> str:
-    return """
-    Você é um editor literário de nível sênior, com foco em ficção.
-    Sua tarefa é revisar, editar e aprimorar o parágrafo a seguir, garantindo que esteja pronto para a publicação.
-    Instruções de Edição: 1. Revisão Gramatical e Ortográfica. 2. Edição de Estilo (Força Narrativa). 3. Coerência de Linguagem e Narrativa.
-    ATENÇÃO: Retorne *apenas* o parágrafo revisado, sem comentários, introduções ou explicações.
-    """
-
+# --- 2. Revisão Parágrafo a Parágrafo (Mantido) ---
 def revisar_paragrafo(paragrafo_texto: str) -> str:
     """Envia o parágrafo para a API da OpenAI e recebe a versão editada."""
     if not paragrafo_texto.strip(): return "" 
-    
-    system_prompt = get_edicao_prompt_system()
+    system_prompt = "Você é um editor literário de nível sênior. Sua tarefa é revisar, editar e aprimorar o parágrafo. Corrija gramática, aprimore o estilo e garanta a coerência. Retorne *apenas* o parágrafo revisado, sem comentários."
     user_content = f"Parágrafo a ser editado:\n---\n{paragrafo_texto}\n---"
-    
-    texto_revisado = call_openai_api(system_prompt, user_content)
-    
+    texto_revisado = call_openai_api(system_prompt, user_content, max_tokens=500)
     if "[ERRO DE CONEXÃO DA API]" in texto_revisado:
         return paragrafo_texto
-    
     return texto_revisado
 
 
 # --- 3. Geração de Relatório Estrutural (Mantido) ---
 def gerar_relatorio_estrutural(texto_completo: str) -> str:
     """Analisa o texto completo para dar feedback estrutural."""
-    system_prompt = "Você é um Editor-Chefe de uma grande editora. Gere um breve Relatório de Revisão para o autor. Foque em: Ritmo da Narrativa, Desenvolvimento de Personagens e Estrutura Geral. Formate o relatório usando títulos e bullet points."
+    system_prompt = "Você é um Editor-Chefe. Gere um breve Relatório de Revisão para o autor. Foque em: Ritmo da Narrativa, Desenvolvimento de Personagens e Estrutura Geral. Use títulos e bullet points."
     user_content = f"MANUSCRITO PARA ANÁLISE:\n---\n{texto_completo[:15000]}\n---"
     return call_openai_api(system_prompt, user_content)
 
 
-# --- 4. Geração do Conteúdo de Capa e Contracapa (Mantido) ---
-def gerar_conteudo_capa_contracapa(titulo: str, autor: str, texto_completo: str) -> str:
-    """Analisa o manuscrito e gera o blurb (texto da contracapa) e sugestões de design."""
-    system_prompt = "Você é um especialista em Marketing e copywriter de best-sellers. Gere o conteúdo da Capa/Contracapa. Requisitos: Blurb (3-4 parágrafos), 3 Palavras-chave de Marketing, Sugestão de Imagem. Use o formato estrito de saída."
-    user_content = f"Título: {titulo}\nAutor: {autor}\nMANUSCRITO PARA ANÁLISE:\n---\n{texto_completo[:15000]}\n---"
-    prompt_final = f"{system_prompt}\n\n{user_content}\n\nUse o seguinte formato de saída:\n## Título: {titulo}\n## Autor: {autor}\n\n**BLURB DA CONTRACAPA:**\n[Seu texto de blurb aqui...]\n\n**PALAVRAS-CHAVE DE MARKETING:**\n[Palavra 1], [Palavra 2], [Palavra 3]\n\n**SUGESTÃO DE ARTE PARA A CAPA:**\n[Sua descrição de imagem aqui...]"
-    return call_openai_api(system_prompt, prompt_final)
+# --- 4. NOVO: Geração de Elementos Pré-Textuais (Copyright, Sobre o Autor) ---
+def gerar_elementos_pre_textuais(titulo: str, autor: str, ano: int, texto_completo: str) -> str:
+    """Gera o texto de Copyright e a bio para a página Sobre o Autor."""
+    system_prompt = """
+    Você é um gerente de editora. Gere o conteúdo essencial de abertura e fechamento para um livro (Ficção/Não-Ficção).
+    Use os dados fornecidos e o tom do manuscrito para criar uma bio atraente.
+    """
+    user_content = f"""
+    Título: {titulo}
+    Autor: {autor}
+    Ano: {ano}
+    Manuscrito (Amostra): {texto_completo[:5000]}
+    
+    Gere o resultado no formato estrito:
+    
+    ### 1. Página de Copyright e Créditos
+    
+    [Informações sobre Copyright (Ex: Direitos Autorais 2025, Carlos Honorato. Todos os direitos reservados. Proibida a reprodução.)]
+    [Informações de Publicação (Ex: Primeira Edição, E-book/Impresso, 2025)]
+    [Aviso Legal padrão]
+    
+    ### 2. Página 'Sobre o Autor'
+    
+    [Bio envolvente de 2-3 parágrafos, formatada para uma página de livro.]
+    """
+    return call_openai_api(system_prompt, user_content)
 
 
-# --- 5. Geração do Relatório de Conformidade KDP (Melhorado) ---
+# --- 5. NOVO: Relatório de Estilo Avançado (Contra Clichês e Vícios) ---
+def gerar_relatorio_estilo_avancado(texto_completo: str) -> str:
+    """Análise de Estilo focada em clichês, redundâncias e voz passiva."""
+    system_prompt = """
+    Você é um Crítico de Estilo Literário. Sua função é analisar o manuscrito para identificar e criticar vícios de escrita.
+    Gere um relatório focado nos 3 itens abaixo.
+    
+    1. **Vícios de Linguagem:** Cite 3-5 exemplos de advérbios desnecessários ou clichês (Ex: "correu rapidamente", "sorriu ironicamente") e sugira como reescrever.
+    2. **Voz Passiva:** Identifique onde a voz passiva torna o texto fraco e sugira a conversão para voz ativa.
+    3. **Ritmo e Leitura (Pontuação):** Dê uma pontuação de 1 a 10 para a fluidez do texto e justifique (Frases longas? Uso excessivo de vírgulas?).
+    """
+    user_content = f"MANUSCRITO PARA ANÁLISE DE ESTILO:\n---\n{texto_completo[:10000]}\n---"
+    return call_openai_api(system_prompt, user_content)
+
+
+# --- 6. Geração do Relatório de Conformidade KDP (Mantido) ---
 def gerar_relatorio_conformidade_kdp(titulo: str, autor: str, page_count: int, format_data: dict, espessura_cm: float, capa_largura_total_cm: float, capa_altura_total_cm: float) -> str:
-    """
-    Gera um checklist de conformidade técnica para upload na Amazon KDP.
-    """
+    """Gera um checklist de conformidade técnica para upload na Amazon KDP."""
     tamanho_corte = format_data['name']
-    
     prompt_kdp = f"""
-    Você é um Especialista Técnico em Publicação e Conformidade da Amazon KDP.
-    Gere um Relatório de Conformidade para o manuscrito, focado em upload bem-sucedido para Livros Físicos (Brochura) e eBooks.
-
-    Dados Fornecidos:
-    - Formato Escolhido: {tamanho_corte}
-    - Páginas (Estimado): {page_count}
-    - Espessura da Lombada (Calculada): {espessura_cm} cm
-    - Capa Completa: {capa_largura_total_cm} cm (Largura) x {capa_altura_total_cm} cm (Altura)
-
-    Gere o relatório usando o formato de lista e títulos:
+    Você é um Especialista Técnico em Publicação e Conformidade da Amazon KDP. Gere um Relatório de Conformidade focado em upload bem-sucedido para Livros Físicos (Brochura) e eBooks.
+    [Dados de Formato Omitidos para concisão do prompt]
     
-    ---
+    Gere o relatório usando o formato de lista e títulos, focando em:
+    
     ### 1. Livro Físico (Brochura - Especificações)
     - **Tamanho de Corte Final (Miolo):** {tamanho_corte} ({format_data['width_cm']} x {format_data['height_cm']} cm).
-    - **Dimensões do Arquivo de Capa:** O seu designer deve criar um PDF único com sangria de 0.3 cm. As dimensões mínimas com sangria devem ser: **{capa_largura_total_cm} cm (Largura) x {capa_altura_total_cm} cm (Altura).**
-    - **Requisito de Miolo:** O DOCX baixado já tem as margens para este formato. O arquivo final de upload deve ser um PDF sem marcas de corte.
+    - **Dimensões do Arquivo de Capa (para Designer):** {capa_largura_total_cm} cm (Largura Total) x {capa_altura_total_cm} cm (Altura Total).
+    - **Requisito do Miolo/Sumário:** Para gerar o Sumário/TOC automático no PDF/EPUB, verifique se todos os títulos de capítulos estão marcados com o estilo 'Título 1' no DOCX baixado.
 
     ### 2. eBook (EPUB/Kindle)
-    Gere um checklist de 5 itens essenciais que o autor deve verificar na formatação do DOCX para garantir um EPUB de qualidade. Foque em: Títulos (Heading 1), Sumário lógico, e espaçamento.
+    Checklist de 5 itens essenciais para um EPUB de qualidade (uso de estilos, remoção de espaços duplos, etc.).
     
     ### 3. Otimização de Metadados (SEO Básico KDP)
     Sugira 3 categorias de nicho da Amazon e 3 palavras-chave de cauda longa para otimizar a listagem do livro.
-    ---
-    
-    Retorne apenas o texto formatado do relatório.
     """
-    response = call_openai_api("Você é um especialista em publicação KDP.", prompt_kdp)
-    return response
+    return call_openai_api("Você é um especialista em publicação KDP.", prompt_kdp)
 
 
-# --- 6. Função Principal: Processamento de Revisão e Diagramação DOCX (AGORA DINÂMICA) ---
+# --- 7. Funções de Diagramação: Inserção de Páginas Pré-textuais ---
 
-def processar_manuscrito(uploaded_file, format_data):
+def adicionar_pagina_rosto(documento: Document, titulo: str, autor: str, style_data: dict):
+    """Adiciona uma página de rosto formatada."""
+    font_name = style_data['font_name']
+    
+    # Adicionar quebra de página (Page Break) antes de começar
+    documento.add_page_break()
+
+    # Título (Centralizado, Negrito, Maior)
+    p_title = documento.add_paragraph()
+    p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_title.add_run(titulo).bold = True
+    p_title.runs[0].font.size = Pt(20)
+    p_title.runs[0].font.name = font_name
+    
+    # Espaço
+    for _ in range(5):
+        documento.add_paragraph()
+    
+    # Autor (Centralizado, menor)
+    p_author = documento.add_paragraph()
+    p_author.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_author.add_run(autor)
+    p_author.runs[0].font.size = Pt(14)
+    p_author.runs[0].font.name = font_name
+
+    documento.add_page_break() # Próxima página é a de Copyright
+
+
+# --- 8. Função Principal: Processamento de Revisão e Diagramação DOCX ---
+
+def processar_manuscrito(uploaded_file, format_data, style_data, pre_text_content):
     documento_original = Document(uploaded_file)
     documento_revisado = Document()
     
-    # --- CONFIGURAÇÃO DINÂMICA DO LIVRO ---
+    # --- CONFIGURAÇÃO DINÂMICA DO LIVRO (Diagramação) ---
     width_in = format_data['width_in']
     height_in = format_data['height_in']
-
+    
+    # Tamanho e Margens
     section = documento_revisado.sections[0]
     section.page_width = Inches(width_in)
     section.page_height = Inches(height_in)
-    
-    # Margens de Livro (Padrão para a maioria dos tamanhos, em polegadas)
-    section.left_margin = Inches(1.0) # Margem Externa
-    section.right_margin = Inches(0.6) # Margem Interna (Gutter/Lombada)
+    section.left_margin = Inches(1.0) 
+    section.right_margin = Inches(0.6) 
     section.top_margin = Inches(0.8)
     section.bottom_margin = Inches(0.8)
 
-    # --- CONFIGURAÇÃO DE ESTILO PROFISSIONAL (EDITORAÇÃO BÁSICA) ---
+    # --- CONFIGURAÇÃO DE ESTILO PROFISSIONAL (EDITORAÇÃO) ---
+    font_name = style_data['font_name']
+    font_size_pt = style_data['font_size_pt']
+    line_spacing = style_data['line_spacing']
+    indent_in = style_data['indent']
+    
     style = documento_revisado.styles['Normal']
-    style.font.name = 'Garamond'
-    style.font.size = Inches(0.15) # Aproximadamente 11pt
+    style.font.name = font_name
+    style.font.size = Pt(font_size_pt) 
 
     paragraph_format = style.paragraph_format
-    paragraph_format.line_spacing = 1.15 # Espaçamento entre linhas
-    paragraph_format.first_line_indent = Inches(0.5) # Recuo de 1,25 cm
+    paragraph_format.line_spacing = line_spacing 
+    paragraph_format.first_line_indent = Inches(indent_in) 
+    
+    # --- INSERÇÃO DE ELEMENTOS PRÉ-TEXTUAIS ---
+    
+    # Página de Rosto (Título e Autor)
+    adicionar_pagina_rosto(documento_revisado, st.session_state['book_title'], st.session_state['book_author'], style_data)
+    
+    # Página de Copyright (Conteúdo gerado pela IA)
+    copyright_text = pre_text_content.split('### 2. Página')[0]
+    p_copy = documento_revisado.add_paragraph()
+    p_copy.style = 'Normal'
+    p_copy.runs[0].font.size = Pt(8)
+    p_copy.add_run(copyright_text)
+    documento_revisado.add_page_break()
+
+    
+    # --- PROCESSAMENTO DO MIOLO (Revisão Parágrafo a Parágrafo) ---
     
     paragrafos = documento_original.paragraphs
     total_paragrafos = len(paragrafos)
@@ -195,141 +256,157 @@ def processar_manuscrito(uploaded_file, format_data):
 
         texto_revisado = revisar_paragrafo(texto_original)
         
-        # Aplica o estilo 'Normal' recém-definido
         novo_paragrafo = documento_revisado.add_paragraph(texto_revisado)
         novo_paragrafo.style = 'Normal' 
         
     progress_bar.progress(100, text="Processamento concluído! 🎉")
-    st.success(f"Manuscrito revisado, formatado e diagramado no formato {format_data['name']} com sucesso.")
+    st.success(f"Manuscrito revisado, formatado e diagramado no formato {format_data['name']} com estilo '{style_data['font_name']}'.")
+
+    # --- INSERÇÃO DA PÁGINA PÓS-TEXTUAL ---
+    documento_revisado.add_page_break()
+    about_author_text = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[1]
     
+    p_header = documento_revisado.add_paragraph()
+    p_header.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_header.add_run("Sobre o Autor").bold = True
+    p_header.runs[0].font.size = Pt(16)
+    
+    documento_revisado.add_paragraph(about_author_text, style='Normal')
+
     return documento_revisado, texto_completo
 
 
-# --- 7. Interface do Streamlit (UI) ---
+# --- 9. Interface do Streamlit (UI) ---
 
-# Coleta de Metadados
+# Inicialização dos dados na sessão
+if 'book_title' not in st.session_state:
+    st.session_state['book_title'] = "O Último Código de Honra"
+    st.session_state['book_author'] = "Carlos Honorato"
+
 st.markdown("---")
 st.subheader("1. Informações e Formato do Livro")
 
-col1, col2, col3 = st.columns([1.5, 1.5, 2])
+col1, col2 = st.columns(2)
 with col1:
-    book_title = st.text_input("Título do Livro", "O Último Código de Honra")
+    st.session_state['book_title'] = st.text_input("Título do Livro", st.session_state['book_title'])
 with col2:
-    book_author = st.text_input("Nome do Autor", "Carlos Honorato")
+    st.session_state['book_author'] = st.text_input("Nome do Autor", st.session_state['book_author'])
 
-# NOVO: Seleção de Tamanho de Corte
-format_option = st.selectbox(
-    "Escolha o Formato do Miolo (Tamanho de Corte) - Essencial para o KDP:",
-    options=list(KDP_SIZES.keys()),
-    index=1, # Padrão A5
-    help="O formato define as dimensões do livro físico e o cálculo da lombada."
-)
+col3, col4 = st.columns(2)
+with col3:
+    format_option = st.selectbox(
+        "Escolha o Formato do Miolo (Tamanho de Corte):",
+        options=list(KDP_SIZES.keys()),
+        index=1, 
+    )
+    selected_format_data = KDP_SIZES[format_option]
 
-selected_format_data = KDP_SIZES[format_option]
+with col4:
+    style_option = st.selectbox(
+        "Escolha o Template de Estilo de Diagramação:",
+        options=list(STYLE_TEMPLATES.keys()),
+        index=0, 
+        help="Altera a fonte, tamanho e espaçamento para o estilo escolhido (Ex: Garamond para romance)."
+    )
+    selected_style_data = STYLE_TEMPLATES[style_option]
+
 
 st.markdown("---")
 
-col4, col5 = st.columns(2)
-with col4:
-    page_count = st.number_input("Contagem Aproximada de Páginas (Miolo)", min_value=10, value=250, step=10, help="Use a contagem de páginas do seu DOCX antes da diagramação.")
+col5, col6 = st.columns(2)
 with col5:
+    page_count = st.number_input("Contagem Aproximada de Páginas (Miolo)", min_value=10, value=250, step=10, help="Use a contagem de páginas do seu DOCX antes da diagramação.")
+with col6:
     uploaded_file = st.file_uploader(
         "2. Faça o upload do seu arquivo .docx", 
         type=['docx'],
         help="O processamento de arquivos grandes pode levar alguns minutos."
     )
 
-st.warning("""
-    AVISO: As margens e o tamanho de corte para impressão foram aplicados neste DOCX. 
-    Para gerar o PDF/X final, utilize a função "Exportar para PDF" em seu editor de texto (Word/LibreOffice).
-""")
+st.warning("O documento final será um DOCX com PÁGINA DE ROSTO, COPYRIGHT e PÁGINA SOBRE O AUTOR, além do miolo diagramado e revisado.")
 
 if uploaded_file is not None and st.button("3. Iniciar PRÉ-IMPRESSÃO COMPLETA"):
-    if not book_title or not book_author:
+    if not st.session_state['book_title'] or not st.session_state['book_author']:
         st.error("Por favor, preencha o Título e o Autor antes de iniciar.")
         st.stop()
         
     st.info("Atenção: O processo de Pré-Impressão foi iniciado. Isso pode levar alguns minutos...")
     
+    # --- PASSO 0: Geração dos Elementos Pré-textuais ---
+    with st.spinner("Gerando conteúdo de Copyright e a página 'Sobre o Autor' com a IA..."):
+        pre_text_content = gerar_elementos_pre_textuais(st.session_state['book_title'], st.session_state['book_author'], 2025, "Amostra do texto para tom.")
+    
     # Processa o manuscrito (revisão e diagrama)
-    documento_revisado, texto_completo = processar_manuscrito(uploaded_file, selected_format_data)
+    documento_revisado, texto_completo = processar_manuscrito(uploaded_file, selected_format_data, selected_style_data, pre_text_content)
     
     if documento_revisado:
         # --- PASSO A: Geração do Relatório Estrutural ---
         st.subheader("RESULTADO 1: Relatório Estrutural (Editor-Chefe)")
         with st.spinner("Analisando ritmo e personagens para o relatório estrutural..."):
             relatorio = gerar_relatorio_estrutural(texto_completo)
-        
         st.text_area("Relatório Estrutural da IA:", relatorio, height=300)
         
-        # --- PASSO B: Geração do Conteúdo da Capa/Contracapa ---
-        st.subheader("RESULTADO 2: Conteúdo de Capa/Contracapa (Marketing)")
-        with st.spinner("Criando o blurb de marketing e sugestões de design..."):
-            conteudo_capa = gerar_conteudo_capa_contracapa(book_title, book_author, texto_completo)
+        # --- PASSO B: NOVO: Relatório de Estilo Avançado ---
+        st.subheader("RESULTADO 2: Relatório de Estilo (Contra Vícios e Clichês)")
+        with st.spinner("Análise de vícios de linguagem e fluidez da escrita..."):
+            relatorio_estilo = gerar_relatorio_estilo_avancado(texto_completo)
+        st.markdown(relatorio_estilo)
         
+        # --- PASSO C: Geração do Conteúdo da Capa/Contracapa ---
+        st.subheader("RESULTADO 3: Conteúdo de Capa/Contracapa (Marketing)")
+        with st.spinner("Criando o blurb de marketing e sugestões de design..."):
+            conteudo_capa = gerar_conteudo_capa_contracapa(st.session_state['book_title'], st.session_state['book_author'], texto_completo)
         st.text_area("Conteúdo de Vendas e Sugestões de Arte:", conteudo_capa, height=400)
 
-        
-        # --- PASSO C: Cálculos Técnicos DINÂMICOS ---
-        # Fator de cálculo (assumindo papel offset 90g)
+        # --- PASSO D: Cálculos Técnicos DINÂMICOS ---
         papel_fator = selected_format_data['papel_fator'] 
-        
-        # 1. Espessura da Lombada (cm)
         espessura_cm = round(page_count * papel_fator, 2) 
-
-        # 2. Largura da Capa Completa (cm) = Capa + Contracapa + Lombada
         capa_largura_total_cm = round((selected_format_data['width_cm'] * 2) + espessura_cm, 2)
-        
-        # 3. Altura da Capa Completa (cm) - Não muda, adicionamos 0.6 cm para sangria (0.3cm topo e 0.3cm rodapé)
         capa_altura_total_cm = round(selected_format_data['height_cm'] + 0.6, 2)
 
-
-        # --- PASSO D: Geração do Relatório de Conformidade KDP (NOVO) ---
-        st.subheader("RESULTADO 3: Relatório de Conformidade KDP (Amazon)")
+        # --- PASSO E: Geração do Relatório de Conformidade KDP ---
+        st.subheader("RESULTADO 4: Relatório de Conformidade KDP (Amazon)")
         with st.spinner("Gerando checklist técnico e de SEO para o upload na Amazon..."):
             relatorio_kdp = gerar_relatorio_conformidade_kdp(
-                book_title, book_author, page_count, selected_format_data, 
+                st.session_state['book_title'], st.session_state['book_author'], page_count, selected_format_data, 
                 espessura_cm, capa_largura_total_cm, capa_altura_total_cm
             )
-        
         st.markdown(relatorio_kdp)
 
         
-        # --- PASSO E: Resumo Técnico Final e Downloads ---
-        st.subheader("RESULTADO 4: Resumo Técnico Final e Downloads")
+        # --- PASSO F: Resumo Técnico Final e Downloads ---
+        st.subheader("RESULTADO 5: Resumo Técnico Final e Downloads")
         
         st.markdown(f"""
-        O seu produto de pré-impressão está pronto para publicação. Entregue os arquivos abaixo ao seu designer gráfico ou gráfica:
+        O seu produto de pré-impressão está pronto. A diagramação foi aplicada no formato **{selected_format_data['name']}** com o estilo **{selected_style_data['font_name']}**.
 
-        #### 📄 Especificações do Livro Físico (Amazon KDP / Gráfica)
-        - **Formato Escolhido:** **{selected_format_data['name']}**
+        #### 📄 Especificações do Livro Físico (KDP / Gráfica)
         - **Miolo (PDF) Tamanho:** {selected_format_data['width_cm']} cm x {selected_format_data['height_cm']} cm
-        - **Número de Páginas (Estimado):** {page_count}
         - **Espessura da Lombada (Estimada):** **{espessura_cm} cm**
-        - **Capa Completa (Arquivo PDF):** **{capa_largura_total_cm} cm (Largura) x {capa_altura_total_cm} cm (Altura)** (Incluindo 0.3cm de sangria em cada lado)
+        - **Capa Completa (Largura x Altura):** **{capa_largura_total_cm} cm x {capa_altura_total_cm} cm** (Entregue esta dimensão ao seu designer!)
         """)
 
 
-        # --- PASSO F: Download dos Arquivos ---
+        # --- PASSO G: Download dos Arquivos ---
         st.markdown("#### ⬇️ Downloads Finais")
-        
-        # Download do Relatório
-        relatorio_buffer = BytesIO(relatorio.encode('utf-8'))
-        st.download_button(
-            label="1. Baixar Relatório Estrutural (.txt)",
-            data=relatorio_buffer,
-            file_name="Relatorio_Estrutural.txt",
-            mime="text/plain"
-        )
         
         # Download do DOCX Diagramado
         buffer = BytesIO()
         documento_revisado.save(buffer)
         buffer.seek(0)
         st.download_button(
-            label="2. Baixar Manuscrito Diagramado (.docx)",
+            label="1. Baixar Manuscrito Diagramado e Formatado (.docx)",
             data=buffer,
-            file_name=f"{book_title.replace(' ', '_')}_FINAL_DIAGRAMADO_{selected_format_data['name'].replace(' ', '_').replace('x','_')}.docx",
+            file_name=f"{st.session_state['book_title'].replace(' ', '_')}_PRE_IMPRESSAO.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        
+        # Downloads dos Relatórios (opcional)
+        relatorio_buffer = BytesIO((relatorio + "\n\n---\n\n" + relatorio_estilo).encode('utf-8'))
+        st.download_button(
+            label="2. Baixar Todos os Relatórios (Estrutura e Estilo) (.txt)",
+            data=relatorio_buffer,
+            file_name="Relatorios_Completos.txt",
+            mime="text/plain"
         )
         st.balloons()
