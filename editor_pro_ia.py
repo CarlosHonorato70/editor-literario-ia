@@ -7,6 +7,7 @@ from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import requests # Para baixar a imagem da URL
 from docx.enum.style import WD_STYLE_TYPE
+import time # Para implementar o backoff em caso de Rate Limit
 
 # --- CONFIGURAÇÃO DE CONSTANTES ---
 
@@ -40,38 +41,48 @@ try:
     PROJECT_ID = None
     if hasattr(st, 'secrets'):
          if API_KEY_NAME in st.secrets:
-             API_KEY = st.secrets[API_KEY_NAME]
+             API_KEY = st.secrets.get(API_KEY_NAME)
          if PROJECT_ID_NAME in st.secrets:
-             PROJECT_ID = st.secrets[PROJECT_ID_NAME]
+             PROJECT_ID = st.secrets.get(PROJECT_ID_NAME)
     
+    # Se as chaves estiverem vazias ou não encontradas, use dummy keys
     if not API_KEY or not PROJECT_ID:
         st.warning(f"Chave e ID do Projeto OpenAI não configurados. A revisão e a geração de capa não funcionarão. Por favor, adicione '{API_KEY_NAME}' e '{PROJECT_ID_NAME}' no Streamlit Secrets.")
-    
-    client = OpenAI(
-        api_key=API_KEY if API_KEY else "dummy_key", 
-        project=PROJECT_ID if PROJECT_ID else "dummy_project"
-    )
+        client = OpenAI(api_key="dummy_key", project="dummy_project")
+    else:
+        client = OpenAI(api_key=API_KEY, project=PROJECT_ID)
+
 except Exception as e:
     st.error(f"Erro na inicialização da API: {e}")
+    client = OpenAI(api_key="dummy_key", project="dummy_project")
+
 
 # --- FUNÇÕES DE AUXÍLIO ---
 
-def call_openai_api(system_prompt: str, user_content: str, max_tokens: int = 3000) -> str:
-    """Função genérica para chamar a API da OpenAI."""
-    try:
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ],
-            temperature=0.7,
-            max_tokens=max_tokens
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        st.error(f"Falha ao se comunicar com a OpenAI. Detalhes: {e}")
-        return f"[ERRO DE CONEXÃO DA API] Falha: {e}"
+def call_openai_api(system_prompt: str, user_content: str, max_tokens: int = 3000, retries: int = 3) -> str:
+    """Função genérica para chamar a API da OpenAI com backoff exponencial."""
+    for i in range(retries):
+        try:
+            response = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content}
+                ],
+                temperature=0.7,
+                max_tokens=max_tokens
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            if "Rate limit reached" in str(e) and i < retries - 1:
+                wait_time = 2 ** i
+                st.warning(f"Limite de taxa atingido. Tentando novamente em {wait_time} segundos... (Tentativa {i+1}/{retries})")
+                time.sleep(wait_time)
+            else:
+                st.error(f"Falha ao se comunicar com a OpenAI. Detalhes: {e}")
+                return f"[ERRO DE CONEXÃO DA API] Falha: {e}"
+    return "[ERRO DE CONEXÃO DA API] Tentativas de conexão esgotadas devido a Rate Limit."
+
 
 def revisar_paragrafo(paragrafo_texto: str) -> str:
     """Revisão de um único parágrafo."""
@@ -233,6 +244,9 @@ def gerar_capa_ia_completa(prompt_visual: str, blurb: str, autor: str, titulo: s
 
 # --- FUNÇÃO PRINCIPAL DE DIAGRAMAÇÃO E REVISÃO ---
 def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices_abnt, status_placeholder):
+    # Verifica se a API está configurada
+    is_api_ready = API_KEY and API_KEY != "dummy_key"
+
     documento_original = Document(uploaded_file)
     documento_revisado = Document()
     
@@ -262,7 +276,18 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
     # --- 3. Geração dos Elementos Pré-textuais ---
     status_placeholder.info("Fase 1/3: Gerando conteúdo de Copyright e 'Sobre o Autor'...")
     uploaded_file.seek(0)
-    pre_text_content = gerar_elementos_pre_textuais(st.session_state['book_title'], st.session_state['book_author'], 2025, uploaded_file.getvalue().decode('utf-8', errors='ignore')[:5000])
+    manuscript_sample = uploaded_file.getvalue().decode('utf-8', errors='ignore')[:5000]
+
+    if is_api_ready:
+        pre_text_content = gerar_elementos_pre_textuais(st.session_state['book_title'], st.session_state['book_author'], 2025, manuscript_sample)
+    else:
+        pre_text_content = """
+        ### 1. Página de Copyright e Créditos
+        [Conteúdo de Copyright Padrão: Edite após o download. A IA não está conectada para gerar este texto.]
+        
+        ### 2. Página 'Sobre o Autor'
+        [Conteúdo sobre o Autor Padrão: Edite após o download. A IA não está conectada para gerar a bio envolvente.]
+        """
 
     # --- 4. Inserção de Elementos Pré-textuais no DOCX ---
     
@@ -270,7 +295,11 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
     adicionar_pagina_rosto(documento_revisado, st.session_state['book_title'], st.session_state['book_author'], style_data)
     
     # Página de Copyright
-    copyright_text_full = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[0].strip()
+    try:
+        copyright_text_full = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[0].strip()
+    except IndexError:
+        copyright_text_full = "[Erro ao extrair o texto de Copyright. Verifique a conexão da API.]"
+    
     documento_revisado.add_paragraph("### 1. Página de Copyright e Créditos").bold = True
     p_copy = documento_revisado.add_paragraph(copyright_text_full.replace("### 1. Página de Copyright e Créditos", "").strip())
     p_copy.style = 'Normal'
@@ -304,7 +333,7 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
             continue 
 
         # Chama a IA para revisão se a chave estiver configurada
-        if API_KEY and PROJECT_ID:
+        if is_api_ready:
             texto_revisado = revisar_paragrafo(texto_original)
         else:
             texto_revisado = texto_original # Pula a revisão
@@ -330,7 +359,11 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
 
     # --- 6. Inserção da Página Pós-Textual ---
     documento_revisado.add_page_break()
-    about_author_text_full = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[1].strip()
+    try:
+        about_author_text_full = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[1].strip()
+    except IndexError:
+        about_author_text_full = "[Erro ao extrair a bio do Autor. Verifique a conexão da API.]"
+    
     adicionar_pagina_generica(documento_revisado, "Sobre o Autor", "Sua biografia gerada pela IA")
     documento_revisado.add_paragraph(about_author_text_full, style='Normal')
     
@@ -340,8 +373,12 @@ def processar_manuscrito(uploaded_file, format_data, style_data, incluir_indices
 
     # --- 7. Geração do Blurb de Marketing (para uso na próxima tab) ---
     status_placeholder.info("Fase 3/3: Gerando Blurb de Marketing e preparando para análise...")
-    blurb_gerado = gerar_conteudo_marketing(st.session_state['book_title'], st.session_state['book_author'], texto_completo)
     
+    if is_api_ready:
+        blurb_gerado = gerar_conteudo_marketing(st.session_state['book_title'], st.session_state['book_author'], texto_completo)
+    else:
+        blurb_gerado = "[Blurb não gerado. Conecte a API para um texto de vendas profissional.]"
+
     return documento_revisado, texto_completo, blurb_gerado
 
 # --- INICIALIZAÇÃO DE ESTADO ---
@@ -355,6 +392,17 @@ if 'book_title' not in st.session_state:
     st.session_state['texto_completo'] = ""
     st.session_state['documento_revisado'] = None
     st.session_state['relatorio_kdp'] = ""
+    st.session_state['format_option'] = "Padrão A5 (5.83x8.27 in)"
+    st.session_state['incluir_indices_abnt'] = False
+
+# --- CÁLCULOS DINÂMICOS (Executados em todas as execuções do script) ---
+format_option_default = "Padrão A5 (5.83x8.27 in)"
+selected_format_data_calc = KDP_SIZES.get(st.session_state.get('format_option', format_option_default), KDP_SIZES[format_option_default])
+
+espessura_cm = round(st.session_state['page_count'] * selected_format_data_calc['papel_fator'], 2) 
+capa_largura_total_cm = round((selected_format_data_calc['width_cm'] * 2) + espessura_cm, 2)
+capa_altura_total_cm = round(selected_format_data_calc['height_cm'] + 0.6, 2)
+# --- FIM CÁLCULOS DINÂMICOS ---
 
 # --- FLUXO PRINCIPAL DO APLICATIVO (Tabs) ---
 
@@ -381,24 +429,39 @@ with config_tab:
     
     col3, col4, col5 = st.columns(3)
     with col3:
-        format_option = st.selectbox(
+        # Salva o formato escolhido no session_state
+        st.session_state['format_option'] = st.selectbox(
             "Tamanho de Corte Final (KDP/Gráfica):",
             options=list(KDP_SIZES.keys()),
-            index=1, 
+            index=list(KDP_SIZES.keys()).index(st.session_state['format_option']), # Mantém o estado
         )
-        selected_format_data = KDP_SIZES[format_option]
+        selected_format_data = KDP_SIZES[st.session_state['format_option']]
     
     with col4:
+        # Pega o estilo de volta, ou define o padrão se for a primeira vez
+        default_style_key = "Romance Clássico (Garamond)"
+        
+        # Tenta pegar o valor atual do session state ou usa o default
+        current_style_key = st.session_state.get('style_option', default_style_key) 
+        
         style_option = st.selectbox(
             "Template de Estilo de Diagramação:",
             options=list(STYLE_TEMPLATES.keys()),
-            index=0, 
+            index=list(STYLE_TEMPLATES.keys()).index(current_style_key), 
+            key='style_option', # Usa uma chave de estado para o selectbox
             help="Define fonte, tamanho e espaçamento (Ex: ABNT para trabalhos acadêmicos)."
         )
         selected_style_data = STYLE_TEMPLATES[style_option]
+        st.session_state['style_option'] = style_option # Atualiza o estado
         
     with col5:
-        incluir_indices_abnt = st.checkbox("Incluir Índices/Apêndices ABNT", value=False, help="Adiciona placeholders para Sumário, Índice de Tabelas, Apêndices e Anexos.")
+        incluir_indices_abnt = st.checkbox(
+            "Incluir Índices/Apêndices ABNT", 
+            value=st.session_state['incluir_indices_abnt'], 
+            key='incluir_indices_abnt_checkbox', # Usa uma chave de estado para o checkbox
+            help="Adiciona placeholders para Sumário, Índice de Tabelas, Apêndices e Anexos."
+        )
+        st.session_state['incluir_indices_abnt'] = incluir_indices_abnt # Atualiza o estado
         
     st.subheader("Upload do Manuscrito")
     uploaded_file = st.file_uploader(
@@ -406,13 +469,9 @@ with config_tab:
         type=['docx'],
         help="O processamento de arquivos grandes pode levar alguns minutos. Recomendamos salvar a cada etapa."
     )
-    
-    # Cálculos dinâmicos
-    espessura_cm = round(st.session_state['page_count'] * selected_format_data['papel_fator'], 2) 
-    capa_largura_total_cm = round((selected_format_data['width_cm'] * 2) + espessura_cm, 2)
-    capa_altura_total_cm = round(selected_format_data['height_cm'] + 0.6, 2)
-    
-    st.info(f"**Cálculo da Lombada (Spine):** {espessura_cm} cm. **Dimensão Total da Capa:** {capa_largura_total_cm} cm x {capa_altura_total_cm} cm. Esses dados serão usados para a Capa IA.")
+    st.session_state['uploaded_file'] = uploaded_file
+
+    st.info(f"**Cálculo da Lombada (Spine):** **{espessura_cm} cm**. **Dimensão Total da Capa:** **{capa_largura_total_cm} cm x {capa_altura_total_cm} cm**. Esses dados serão usados para a Capa IA.")
 
 
 # --- TAB 2: DIAGRAMAÇÃO & ELEMENTOS ---
@@ -420,20 +479,33 @@ with config_tab:
 with miolo_tab:
     st.header("Fluxo de Diagramação e Revisão com IA")
     
+    uploaded_file = st.session_state.get('uploaded_file')
+
     if uploaded_file is None:
         st.warning("Por favor, carregue um arquivo .docx na aba '1. Configuração Inicial' para começar.")
     else:
         
         if st.button("▶️ Iniciar Processamento do Miolo (Diagramação e Revisão)"):
-            if not API_KEY or not PROJECT_ID:
-                st.error("Atenção: As chaves OpenAI não estão configuradas. Apenas a diagramação do miolo e a geração do blurb serão realizadas. A revisão da IA será ignorada.")
+            if not API_KEY or API_KEY == "dummy_key":
+                st.error("Atenção: As chaves OpenAI não estão configuradas. Apenas a diagramação do miolo e a geração do blurb (placeholder) serão realizadas. A revisão da IA será ignorada.")
             
             st.info("Processamento iniciado! Acompanhe o progresso abaixo...")
             status_placeholder = st.empty()
             
+            # Recarrega dados de estado
+            selected_format_data = KDP_SIZES[st.session_state['format_option']]
+            # Garante que selected_style_data é carregado a partir do estado do selectbox
+            selected_style_data = STYLE_TEMPLATES[st.session_state.get('style_option', default_style_key)] 
+            
             # --- Executa o processamento em passos (Fases 1 a 3) ---
             uploaded_file.seek(0)
-            documento_revisado, texto_completo, blurb_gerado = processar_manuscrito(uploaded_file, selected_format_data, selected_style_data, incluir_indices_abnt, status_placeholder)
+            documento_revisado, texto_completo, blurb_gerado = processar_manuscrito(
+                uploaded_file, 
+                selected_format_data, 
+                selected_style_data, 
+                st.session_state['incluir_indices_abnt'], 
+                status_placeholder
+            )
             
             st.session_state['documento_revisado'] = documento_revisado
             st.session_state['texto_completo'] = texto_completo
@@ -443,11 +515,13 @@ with miolo_tab:
             st.toast("Miolo Pronto!", icon="✅")
             
         if st.session_state['documento_revisado']:
-            st.success(f"Miolo diagramado no formato {format_option} com o estilo '{selected_style_data['font_name']}'.")
+            selected_style_data = STYLE_TEMPLATES[st.session_state.get('style_option', default_style_key)] 
+            st.success(f"Miolo diagramado no formato **{st.session_state['format_option']}** com o estilo **'{selected_style_data['font_name']}'**.")
             
             st.subheader("Intervenção: Blurb da Contracapa")
-            st.warning("O Blurb abaixo será usado no design da Capa Completa e no relatório de análise. Edite-o se necessário.")
-            st.session_state['blurb'] = st.text_area("Texto de Vendas (Blurb):", st.session_state['blurb'], height=300)
+            st.warning("O Blurb abaixo será usado no design da Capa Completa e no relatório de análise. Edite-o antes de gerar a capa.")
+            # Usa a mesma chave para manter o estado
+            st.session_state['blurb'] = st.text_area("Texto de Vendas (Blurb):", st.session_state['blurb'], height=300, key='blurb_text_area')
 
 
 # --- TAB 3: CAPA COMPLETA IA ---
@@ -461,7 +535,7 @@ with capa_tab:
         
         st.subheader("Passo 1: Defina o Conteúdo Visual e de Texto")
         
-        st.info(f"O Blurb atual (Contracapa) é: {st.session_state['blurb'][:150]}...")
+        st.info(f"O Blurb atual (Contracapa) é: **{st.session_state['blurb'][:150]}...**")
         st.text_input("Título para Capa", st.session_state['book_title'], disabled=True)
         st.text_input("Autor para Capa", st.session_state['book_author'], disabled=True)
         
@@ -469,6 +543,7 @@ with capa_tab:
             "Descrição VISUAL da Capa (Estilo DALL-E 3):", 
             st.session_state['capa_prompt'], 
             height=200,
+            key='capa_prompt_area',
             help="Descreva a arte que deve aparecer, o estilo (ex: óleo, arte digital, surrealismo) e as cores predominantes."
         )
 
@@ -476,7 +551,7 @@ with capa_tab:
         st.warning(f"Atenção: O modelo DALL-E 3 gera uma imagem do design COMPLETO com as dimensões de **{capa_largura_total_cm}cm x {capa_altura_total_cm}cm** (calculado).")
 
         if st.button("🎨 Gerar Capa COMPLETA com IA"):
-            if not API_KEY or not PROJECT_ID:
+            if not API_KEY or API_KEY == "dummy_key":
                 st.error("Chaves OpenAI não configuradas. Não é possível gerar a imagem.")
             else:
                 with st.spinner("Gerando design completo da capa (Frente, Lombada e Verso)... Este processo usa DALL-E 3 e pode levar até um minuto."):
@@ -507,25 +582,37 @@ with capa_tab:
 with export_tab:
     st.header("Relatórios Finais e Exportação")
 
-    if not st.session_state['documento_revisado']:
+    if not st.session_state.get('documento_revisado'):
         st.warning("Por favor, execute o processamento do Miolo (Aba 2) antes de exportar.")
     else:
         
+        is_api_ready = API_KEY and API_KEY != "dummy_key"
+
         # --- Relatório Estrutural ---
         st.subheader("1. Relatório Estrutural (Editor-Chefe)")
-        with st.spinner("Analisando ritmo e personagens..."):
-            relatorio = gerar_relatorio_estrutural(st.session_state['texto_completo'])
-        st.markdown(relatorio)
+        if is_api_ready:
+            # Geração do Relatório Estrutural (se ainda não gerado)
+            if 'relatorio_estrutural' not in st.session_state or st.button("Gerar/Atualizar Relatório Estrutural"):
+                 with st.spinner("Analisando ritmo e personagens..."):
+                    relatorio = gerar_relatorio_estrutural(st.session_state['texto_completo'])
+                    st.session_state['relatorio_estrutural'] = relatorio
+            
+            st.markdown(st.session_state['relatorio_estrutural'])
+        else:
+            st.warning("Relatório Estrutural não gerado. Conecte a API para receber o feedback do Editor-Chefe.")
         
-        # --- Relatório KDP/Técnico (Gerado na exportação para garantir os dados mais recentes) ---
+        # --- Relatório KDP/Técnico ---
         if st.button("Gerar/Atualizar Relatório Técnico KDP"):
-            with st.spinner("Gerando checklist técnico e de SEO para o upload..."):
-                relatorio_kdp = gerar_relatorio_conformidade_kdp(
-                    st.session_state['book_title'], st.session_state['book_author'], st.session_state['page_count'], selected_format_data, 
-                    espessura_cm, capa_largura_total_cm, capa_altura_total_cm
-                )
-                st.session_state['relatorio_kdp'] = relatorio_kdp
-                st.success("Relatório KDP atualizado.")
+            if is_api_ready:
+                with st.spinner("Gerando checklist técnico e de SEO para o upload..."):
+                    relatorio_kdp = gerar_relatorio_conformidade_kdp(
+                        st.session_state['book_title'], st.session_state['book_author'], st.session_state['page_count'], selected_format_data_calc, 
+                        espessura_cm, capa_largura_total_cm, capa_altura_total_cm
+                    )
+                    st.session_state['relatorio_kdp'] = relatorio_kdp
+                    st.success("Relatório KDP atualizado.")
+            else:
+                st.error("Conecte a API para gerar o Relatório KDP.")
         
         if st.session_state['relatorio_kdp']:
             st.subheader("2. Relatório de Conformidade KDP (Amazon)")
@@ -536,7 +623,7 @@ with export_tab:
         
         st.markdown(f"""
         #### 📄 Especificações Técnicas (Valores FINAIS)
-        - **Miolo (PDF) Tamanho:** {selected_format_data['width_cm']} cm x {selected_format_data['height_cm']} cm
+        - **Miolo (PDF) Tamanho:** {selected_format_data_calc['width_cm']} cm x {selected_format_data_calc['height_cm']} cm
         - **Espessura da Lombada (Spine):** **{espessura_cm} cm**
         - **Capa Completa (Largura x Altura):** **{capa_largura_total_cm} cm x {capa_altura_total_cm} cm** (Entregue essa dimensão ao designer ou use-a como guia para a arte gerada!)
         """)
