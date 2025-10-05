@@ -121,8 +121,8 @@ def revisar_paragrafo(paragrafo_texto: str) -> str:
     if "[ERRO DE CONEXÃO DA API]" in texto_revisado:
         return paragrafo_texto
     
-    # *** CORREÇÃO DE ESTABILIDADE FINAL: Atraso de 2 segundos para respeitar o limite de 3 RPM ***
-    time.sleep(2) 
+    # *** CORREÇÃO DE ESTABILIDADE FINAL: Atraso de 0.3 segundos (para contas pagas) para evitar picos de Rate Limit (cerca de 200 RPM) ***
+    time.sleep(0.3) 
     
     return texto_revisado
 
@@ -309,7 +309,7 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
     manuscript_sample = uploaded_file.getvalue().decode('utf-8', errors='ignore')[:5000]
 
     if is_api_ready:
-        time.sleep(2) 
+        time.sleep(0.3) 
         pre_text_content = gerar_elementos_pre_textuais(st.session_state['book_title'], st.session_state['book_author'], 2025, manuscript_sample)
     else:
         pre_text_content = """
@@ -371,7 +371,7 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
         if (i + 1) % update_interval == 0 or i == total_paragrafos - 1:
             percent_complete = int((i + 1) / total_paragrafos * 100)
             # Nota: O aviso sobre o tempo de espera é importante para o usuário
-            progress_bar.progress(percent_complete, text=f"Revisando e diagramando o miolo... {percent_complete}% (Revisão IA: Aproximadamente 2s/parágrafo)")
+            progress_bar.progress(percent_complete, text=f"Revisando e diagramando o miolo... {percent_complete}% (Revisão IA: Aproximadamente 0.3s/parágrafo)")
 
         if len(texto_original.strip()) < 10:
             documento_revisado.add_paragraph(texto_original)
@@ -433,7 +433,7 @@ def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, inc
         st.info("Fase 3/3: Gerando Blurb de Marketing e preparando para análise...")
     
     if is_api_ready:
-        time.sleep(2) # Mais um atraso para geração do blurb
+        time.sleep(0.3) # Mais um atraso para geração do blurb
         blurb_gerado = gerar_conteudo_marketing(st.session_state['book_title'], st.session_state['book_author'], texto_completo)
     else:
         blurb_gerado = "[Blurb não gerado. Conecte a API para um texto de vendas profissional.]"
@@ -517,7 +517,7 @@ with config_tab:
             help="Define fonte, tamanho e espaçamento (Ex: ABNT para trabalhos acadêmicos)."
         )
         selected_style_data = STYLE_TEMPLATES[style_option]
-        # LINHA 519 (AGORA LINHA 508) REMOVIDA: st.session_state['style_option'] = style_option
+        # A atribuição redundante foi removida
         
     with col5:
         incluir_indices_abnt = st.checkbox(
@@ -666,7 +666,7 @@ with export_tab:
             # Condição para evitar re-gerar o relatório desnecessariamente
             if 'relatorio_estrutural' not in st.session_state or st.session_state['relatorio_estrutural'] == "" or st.button("Gerar/Atualizar Relatório Estrutural"):
                 with st.spinner("Analisando ritmo e personagens..."):
-                    time.sleep(2) # Atraso para o Relatório Estrutural
+                    time.sleep(0.3) # Atraso para o Relatório Estrutural
                     relatorio = gerar_relatorio_estrutural(st.session_state['texto_completo'])
                     st.session_state['relatorio_estrutural'] = relatorio
             
@@ -685,7 +685,7 @@ with export_tab:
         if st.button("Gerar/Atualizar Relatório Técnico KDP"):
             if is_api_ready:
                 with st.spinner("Gerando checklist técnico e de SEO para o upload..."):
-                    time.sleep(2) # Atraso para o Relatório KDP
+                    time.sleep(0.3) # Atraso para o Relatório KDP
                     relatorio = gerar_relatorio_conformidade_kdp(
                         st.session_state['book_title'], 
                         st.session_state['book_author'], 
