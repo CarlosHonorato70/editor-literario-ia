@@ -524,7 +524,7 @@ def adicionar_campo_sumario(documento: Document):
     run._r.append(fldChar)
     instrText = OxmlElement('w:instrText')
     instrText.set(qn('xml:space'), 'preserve')
-    instrText.text = 'TOC \o "1-3" \h \z \u' # Isso instrui o Word a construir o TOC
+    instrText.text = r'TOC \o "1-3" \h \z \u' # Isso instrui o Word a construir o TOC
     run._r.append(instrText)
     fldChar = OxmlElement('w:fldChar')
     fldChar.set(qn('w:fldCharType'), 'end')
