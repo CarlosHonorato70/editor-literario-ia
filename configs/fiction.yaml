@@ -1,0 +1,36 @@
+# Configuração para Ficção/Romance
+
+project_name: "Fiction Manuscript"
+version: "2.0"
+
+# Configurações de API
+openai_model: "gpt-4o-mini"
+enable_ai_enhancement: true
+enable_ai_review: true
+
+# Formatação para Ficção
+default_format: "6x9"
+default_font: "Garamond"
+default_font_size: 11
+default_line_spacing: 1.15
+
+# Elementos (sem acadêmicos)
+generate_pre_textual: true
+generate_post_textual: false
+generate_glossary: false
+generate_index: false
+
+# Revisão Focada em Narrativa
+check_grammar: true
+check_style: true
+check_consistency: true
+check_references: false
+
+# Exportação
+export_formats:
+  - md
+  - docx
+  - pdf
+
+include_metadata: true
+include_diagrams: false

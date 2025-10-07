@@ -1,0 +1,36 @@
+# Configuração para Livros Acadêmicos/Científicos
+
+project_name: "Academic Manuscript"
+version: "2.0"
+
+# Configurações de API
+openai_model: "gpt-4o-mini"
+enable_ai_enhancement: true
+enable_ai_review: true
+
+# Formatação Acadêmica
+default_format: "A4"
+default_font: "Times New Roman"
+default_font_size: 12
+default_line_spacing: 1.5
+
+# Elementos Acadêmicos
+generate_pre_textual: true
+generate_post_textual: true
+generate_glossary: true
+generate_index: true
+
+# Revisão Rigorosa
+check_grammar: true
+check_style: true
+check_consistency: true
+check_references: true
+
+# Exportação
+export_formats:
+  - md
+  - docx
+  - pdf
+
+include_metadata: true
+include_diagrams: true

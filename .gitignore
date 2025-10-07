@@ -1,1 +1,41 @@
-.streamlit/secrets.toml
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Outputs
+output/
+*.pdf
+*.docx
+
+# Cache
+.cache/
+*.log
+
+# Configurações sensíveis
+configs/*_private.yaml
+.env
+
+# Temporários
+temp/
+tmp/
+*.tmp

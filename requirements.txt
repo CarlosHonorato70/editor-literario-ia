@@ -1,4 +1,31 @@
-streamlit
-openai
-python-docx
-stqdm==0.0.5
+# Dependências do Sistema de Preparação de Manuscritos
+# Versão 2.0
+
+# Core
+pyyaml>=6.0
+pathlib>=1.0
+
+# Processamento de Documentos
+PyPDF2>=3.0.0
+python-docx>=0.8.11
+markdown>=3.4.0
+
+# IA e NLP
+openai>=1.0.0
+tiktoken>=0.5.0
+
+# Exportação
+weasyprint>=59.0  # Para PDF
+reportlab>=4.0.0  # Alternativa para PDF
+
+# Análise de Texto
+textstat>=0.7.3  # Métricas de legibilidade
+
+# Utilidades
+tqdm>=4.65.0  # Barras de progresso
+colorama>=0.4.6  # Cores no terminal
+
+# Opcional (para recursos avançados)
+# docx2pdf>=0.1.8  # Conversão DOCX para PDF (Windows)
+# pillow>=10.0.0  # Processamento de imagens
+# matplotlib>=3.7.0  # Geração de gráficos
