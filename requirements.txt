@@ -25,7 +25,15 @@ textstat>=0.7.3  # Métricas de legibilidade
 tqdm>=4.65.0  # Barras de progresso
 colorama>=0.4.6  # Cores no terminal
 
+# Produção Editorial (Fase 3)
+pillow>=10.0.0  # Design de capas e processamento de imagens
+jinja2>=3.1.0  # Templates HTML para diagramação
+pdfplumber>=0.10.0  # Análise de layout de PDF
+language-tool-python>=2.7.0  # Revisão gramatical
+python-barcode>=0.15.0  # Geração de códigos de barras ISBN
+qrcode>=7.4.0  # Geração de QR codes
+requests>=2.31.0  # Download de imagens de IA
+
 # Opcional (para recursos avançados)
 # docx2pdf>=0.1.8  # Conversão DOCX para PDF (Windows)
-# pillow>=10.0.0  # Processamento de imagens
 # matplotlib>=3.7.0  # Geração de gráficos
