@@ -3,7 +3,7 @@ import io
 import time
 import math
 from docx import Document
-from openai import OpenAI # <-- NOVA IMPORTAÇÃO AQUI
+from openai import OpenAI
 
 # --- Configurações da Página Streamlit ---
 st.set_page_config(
@@ -15,7 +15,7 @@ st.set_page_config(
 # --- Funções de Lógica ---
 
 def analisar_texto(texto: str):
-    """Calcula estatísticas básicas sobre o texto."""
+    # (Esta função permanece a mesma)
     if not texto: return None
     palavras = texto.split()
     num_palavras = len(palavras)
@@ -32,47 +32,26 @@ def analisar_texto(texto: str):
         "Tempo Estimado de Leitura": f"{minutos} min e {segundos} seg"
     }
 
-# <-- NOVA FUNÇÃO AQUI: Implementa a geração de resumo com IA -->
 def gerar_resumo_ia(texto: str):
-    """
-    Usa a API da OpenAI para gerar um resumo do texto fornecido.
-    Retorna o resumo como uma string ou uma mensagem de erro.
-    """
-    if not texto:
-        return "Erro: Não há texto para resumir."
-    
+    # (Esta função permanece a mesma)
+    if not texto: return "Erro: Não há texto para resumir."
     try:
-        # Inicializa o cliente da OpenAI usando a chave dos Secrets
         client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-
-        # Monta a instrução para a IA
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",  # Modelo rápido e eficiente para resumos
+            model="gpt-3.5-turbo",
             messages=[
-                {
-                    "role": "system", 
-                    "content": "Você é um assistente de escrita especializado em literatura. Sua tarefa é criar resumos concisos e envolventes de textos."
-                },
-                {
-                    "role": "user", 
-                    "content": f"Por favor, gere um resumo de um parágrafo para o seguinte texto:\n\n---\n\n{texto}"
-                }
+                {"role": "system", "content": "Você é um assistente de escrita especializado em literatura. Sua tarefa é criar resumos concisos e envolventes de textos."},
+                {"role": "user", "content": f"Por favor, gere um resumo de um parágrafo para o seguinte trecho:\n\n---\n\n{texto}"}
             ],
-            temperature=0.7, # Um pouco de criatividade, mas ainda focado no conteúdo
-            max_tokens=250   # Limita o tamanho do resumo
+            temperature=0.7, max_tokens=250
         )
-        # Extrai e retorna o conteúdo do resumo
         return response.choices[0].message.content
-
     except Exception as e:
-        # Retorna uma mensagem de erro amigável se algo der errado (ex: chave de API inválida)
         st.error(f"Ocorreu um erro ao conectar com a IA: {e}")
         return "Não foi possível gerar o resumo. Verifique sua chave de API ou tente novamente mais tarde."
 
-
-# --- Barra Lateral: Configuração Inicial ---
+# --- Barra Lateral (permanece a mesma) ---
 st.sidebar.title("Configuração Inicial")
-# (O resto da barra lateral permanece o mesmo)
 book_title = st.sidebar.text_input("Título do livro", "Mentes brilhantes, caminhos")
 author_name = st.sidebar.text_input("Autor(a)", "Carlos Honorato")
 selected_miolo_format = st.sidebar.selectbox("Formato do miolo (KDP/Gráfica)", ["KDP 5,5 x 8,5 pol (140 páginas)"])
@@ -86,31 +65,28 @@ tab1, tab2 = st.tabs(["Manuscrito", "Exportar"])
 with tab1:
     st.subheader("Selecione seu arquivo (.txt ou .docx) aqui:")
 
-    uploaded_file = st.file_uploader(
-        "Arraste e solte o arquivo aqui", type=["txt", "docx"], help="Formatos: TXT, DOCX."
-    )
+    uploaded_file = st.file_uploader("Arraste e solte o arquivo", type=["txt", "docx"], help="Formatos: TXT, DOCX.")
 
-    # Gerenciamento do estado da sessão
-    if 'text_content' not in st.session_state:
-        st.session_state.text_content = ""
-    if 'file_processed' not in st.session_state:
-        st.session_state.file_processed = False
-    if 'last_uploaded_file_id' not in st.session_state:
-        st.session_state.last_uploaded_file_id = None
-    if 'resumo_gerado' not in st.session_state: # <-- Novo estado para guardar o resumo
-        st.session_state.resumo_gerado = ""
+    # Inicialização do estado da sessão
+    if 'text_content' not in st.session_state: st.session_state.text_content = ""
+    if 'file_processed' not in st.session_state: st.session_state.file_processed = False
+    if 'last_uploaded_file_id' not in st.session_state: st.session_state.last_uploaded_file_id = None
+    if 'resumo_gerado' not in st.session_state: st.session_state.resumo_gerado = ""
+    if 'analise_resultados' not in st.session_state: st.session_state.analise_resultados = None
 
     # Lógica de upload (permanece a mesma)
     if uploaded_file is not None:
         current_file_id = f"{uploaded_file.name}-{uploaded_file.size}"
         if st.session_state.last_uploaded_file_id != current_file_id:
+            # ... (código de upload e processamento do arquivo) ...
             st.session_state.last_uploaded_file_id = current_file_id
             st.session_state.text_content = ""
-            st.session_state.resumo_gerado = "" # Limpa resumo antigo ao carregar novo arquivo
+            st.session_state.resumo_gerado = ""
+            st.session_state.analise_resultados = None
             st.session_state.file_processed = False
             progress_bar = st.progress(0, "Processando arquivo...")
             try:
-                # ... (Lógica de leitura de TXT e DOCX) ...
+                text_content = ""
                 if uploaded_file.name.endswith('.txt'):
                     text_content = io.StringIO(uploaded_file.getvalue().decode("utf-8")).read()
                 elif uploaded_file.name.endswith('.docx'):
@@ -136,35 +112,47 @@ with tab1:
         st.write("---")
         st.subheader("Ferramentas de Edição:")
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
+            # Ferramenta de Análise
             if st.button("Analisar Texto", help="Analisa estatísticas do manuscrito."):
-                # (Lógica de análise permanece a mesma)
                 with st.spinner("Analisando..."):
                     analise = analisar_texto(st.session_state.text_content)
                     if analise:
-                        st.session_state.analise_resultados = analise # Salva no estado
+                        st.session_state.analise_resultados = analise
                     else:
                         st.warning("Não há texto para analisar.")
         with col2:
-            # <-- LÓGICA DO BOTÃO "GERAR RESUMO" ATUALIZADA -->
-            if st.button("Gerar Resumo", help="Cria um resumo conciso com IA."):
-                with st.spinner("�� A IA está pensando... Isso pode levar um momento."):
-                    resumo = gerar_resumo_ia(st.session_state.text_content)
-                    st.session_state.resumo_gerado = resumo # Salva o resumo no estado
-        with col3:
             if st.button("Formatar Manuscrito", help="Aplica o modelo de estilo selecionado."):
                 st.info("Formatando... (Funcionalidade a ser implementada)")
+        
+        # <-- SEÇÃO DE RESUMO ATUALIZADA -->
+        st.write("---")
+        st.subheader("Resumo com Inteligência Artificial")
+        
+        # O limite de tokens é ~4 caracteres/token. 16385 tokens * 3.5 ≈ 57000 caracteres.
+        # Vamos usar um limite seguro de 15000 caracteres para garantir que não exceda.
+        max_chars_para_resumo = 15000
+        
+        if len(st.session_state.text_content) > max_chars_para_resumo:
+            st.warning(f"Seu manuscrito é muito longo para ser resumido de uma só vez. Apenas os primeiros {max_chars_para_resumo} caracteres serão usados.")
+            texto_para_resumir = st.session_state.text_content[:max_chars_para_resumo]
+        else:
+            texto_para_resumir = st.session_state.text_content
 
-        # Exibe os resultados da análise, se existirem
-        if 'analise_resultados' in st.session_state and st.session_state.analise_resultados:
+        if st.button("Gerar Resumo Agora", help="Cria um resumo conciso com IA usando uma parte do texto.", type="primary"):
+            with st.spinner("🤖 A IA está pensando... Isso pode levar um momento."):
+                resumo = gerar_resumo_ia(texto_para_resumir)
+                st.session_state.resumo_gerado = resumo
+        
+        # Exibe os resultados
+        if st.session_state.analise_resultados:
             st.subheader("Resultados da Análise")
             for metrica, valor in st.session_state.analise_resultados.items():
                 st.metric(label=metrica, value=valor)
             if st.button("Limpar Análise"):
-                del st.session_state.analise_resultados
+                st.session_state.analise_resultados = None
 
-        # Exibe o resumo gerado, se existir
         if st.session_state.resumo_gerado:
             st.subheader("Resumo Gerado pela IA")
             st.success(st.session_state.resumo_gerado)
@@ -173,7 +161,6 @@ with tab1:
 
     elif not st.session_state.get('text_content'):
         st.info("Aguardando o carregamento de um arquivo para começar.")
-
 
 with tab2:
     st.write("Funcionalidade de Exportação aqui.")
