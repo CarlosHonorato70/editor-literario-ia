@@ -11,6 +11,7 @@ import time
 from typing import Optional, Dict, Tuple, Any, List
 import math
 import json
+from fastformat import FastFormatOptions, apply_fastformat, make_unified_diff, default_options
 
 # --- CONFIGURAÇÃO DE CONSTANTES ---
 
@@ -1108,3 +1109,153 @@ with slides_tab:
                     st.write(slide.get('conteudo', ''))
                     st.markdown("--- ")
 
+def fastformat_options_ui() -> FastFormatOptions:
+    st.sidebar.markdown("## FastFormat")
+    preset = st.sidebar.selectbox(
+        "Preset",
+        ["Básico (recomendado)", "Tipográfico (ênfase em aspas/dashes)", "Conservador", "Personalizado"],
+        index=0
+    )
+
+    # Valores padrão
+    opts = default_options()
+
+    if preset == "Básico (recomendado)":
+        opts.normalize_spaces = True
+        opts.compress_blank_lines = True
+        opts.max_blank_lines = 1
+        opts.punctuation_spacing = True
+        opts.ellipses = True
+        opts.fix_double_punct = True
+        opts.dashes_ranges_en = True
+        opts.dashes_aside_em = True
+        opts.quotes = True
+        opts.quotes_style = "typographic"
+        opts.capitalize_sentences = False
+        opts.tidy_units_nbsp = True
+
+    elif preset == "Tipográfico (ênfase em aspas/dashes)":
+        opts.normalize_spaces = True
+        opts.compress_blank_lines = True
+        opts.max_blank_lines = 1
+        opts.punctuation_spacing = True
+        opts.ellipses = True
+        opts.fix_double_punct = True
+        opts.dashes_ranges_en = True
+        opts.dashes_aside_em = True
+        opts.quotes = True
+        opts.quotes_style = "typographic"
+        opts.capitalize_sentences = True
+        opts.tidy_units_nbsp = True
+
+    elif preset == "Conservador":
+        opts.normalize_spaces = True
+        opts.compress_blank_lines = True
+        opts.max_blank_lines = 1
+        opts.punctuation_spacing = True
+        opts.ellipses = False
+        opts.fix_double_punct = True
+        opts.dashes_ranges_en = False
+        opts.dashes_aside_em = False
+        opts.quotes = False
+        opts.quotes_style = "straight"
+        opts.capitalize_sentences = False
+        opts.tidy_units_nbsp = False
+
+    else:
+        st.sidebar.caption("Personalize as regras abaixo:")
+
+    # Se for "Personalizado", renderiza os toggles; nos outros, permite ajustes finos se quiser
+    with st.sidebar.expander("Regras do FastFormat", expanded=(preset == "Personalizado")):
+        opts.normalize_spaces = st.checkbox("Normalizar espaços (duplicados, finais de linha)", value=opts.normalize_spaces)
+        opts.compress_blank_lines = st.checkbox("Comprimir linhas em branco", value=opts.compress_blank_lines)
+        if opts.compress_blank_lines:
+            opts.max_blank_lines = st.number_input("Máximo de linhas em branco consecutivas", min_value=1, max_value=3, value=opts.max_blank_lines, step=1)
+        opts.punctuation_spacing = st.checkbox("Ajustar espaçamento de pontuação", value=opts.punctuation_spacing)
+        opts.ellipses = st.checkbox("Normalizar reticências", value=opts.ellipses)
+        opts.fix_double_punct = st.checkbox("Corrigir pontuação repetida (!!, ??)", value=opts.fix_double_punct)
+        c1, c2 = st.columns(2)
+        with c1:
+            opts.dashes_ranges_en = st.checkbox("En dash em intervalos numéricos (10–20)", value=opts.dashes_ranges_en)
+        with c2:
+            opts.dashes_aside_em = st.checkbox("Em dash em incisos ( — )", value=opts.dashes_aside_em)
+        opts.quotes = st.checkbox("Normalizar aspas", value=opts.quotes)
+        if opts.quotes:
+            opts.quotes_style = st.radio("Estilo de aspas", options=["typographic", "straight"], format_func=lambda x: "Tipográficas (“ ”, ‘ ’)" if x=="typographic" else "Retas (" ')", index=0 if opts.quotes_style=="typographic" else 1)
+        opts.capitalize_sentences = st.checkbox("Capitalizar início de frases (heurístico)", value=opts.capitalize_sentences)
+        opts.tidy_units_nbsp = st.checkbox("Espaço irredutível em unidades (10 kg) e 10% sem espaço", value=opts.tidy_units_nbsp)
+
+    return opts
+
+def fastformat_section(texto_inicial: str = "") -> str:
+    st.markdown("## FastFormat")
+    st.caption("Padronize o texto com regras tipográficas e de espaçamento. Pré-visualize as alterações antes de aplicar.")
+
+    opts = fastformat_options_ui()
+
+    texto_original = st.text_area("Texto de entrada", value=texto_inicial, height=240, key="ff_texto_original")
+    col_a, col_b, col_c = st.columns([1,1,1])
+
+    formatted_preview = None
+    report = None
+
+    with col_a:
+        if st.button("Pré-visualizar alterações"):
+            if not texto_original.strip():
+                st.warning("Cole ou digite um texto para pré-visualizar.")
+            else:
+                formatted_preview, report = apply_fastformat(texto_original, opts)
+                diff = make_unified_diff(texto_original, formatted_preview)
+                if not diff:
+                    st.info("Nenhuma alteração necessária segundo as regras atuais.")
+                else:
+                    st.code(diff, language="diff")
+                    st.json(report)
+
+    with col_b:
+        aplicar = st.button("Aplicar FastFormat")
+    with col_c:
+        exportar = st.button("Gerar DOCX formatado")
+
+    # Aplica de fato no texto
+    texto_final = texto_original
+    if aplicar:
+        texto_final, report = apply_fastformat(texto_original, opts)
+        st.success("FastFormat aplicado ao texto.")
+        with st.expander("Relatório de alterações"):
+            st.json(report)
+        st.text_area("Texto formatado (resultado)", value=texto_final, height=240, key="ff_texto_formatado")
+
+    # Exporta DOCX com o resultado atual (se houve aplicação, usa texto_final; caso contrário, aplica on-the-fly)
+    if exportar:
+        resultado = texto_final
+        if resultado == texto_original:
+            resultado, report = apply_fastformat(texto_original, opts)
+
+        # Gera DOCX simples, respeitando parágrafos
+        doc = Document()
+        for bloco in resultado.split("\n\n"):
+            p = doc.add_paragraph()
+            for linha in bloco.split("\n"):
+                if linha:
+                    p.add_run(linha)
+                p.add_run("\n")
+        # Remover a última quebra extra (opcional)
+        bio = __import__("io").BytesIO()
+        doc.save(bio)
+        st.download_button(
+            label="Baixar DOCX",
+            data=bio.getvalue(),
+            file_name="texto_fastformat.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
+    return texto_final
+
+with st.expander("FastFormat (clique para abrir)", expanded=True):
+    # Se você já mantém um texto principal em session_state, passe aqui:
+    texto_existente = st.session_state.get("texto_principal", "")
+    texto_formatado = fastformat_section(texto_existente)
+    # Se quiser, salve o resultado no estado principal após aplicar:
+    if texto_formatado != texto_existente:
+        st.session_state["texto_principal"] = texto_formatado
