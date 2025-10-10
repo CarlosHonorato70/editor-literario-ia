@@ -1,196 +1,123 @@
 import streamlit as st
 import io
-import time
 import re
 import math
 import smartypants
 import language_tool_python
 from docx import Document
-from docx.shared import Pt, Cm
+from docx.shared import Pt, Cm, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from openai import OpenAI
 
-# --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Adapta ONE - Editor Editorial Completo", page_icon="📚", layout="wide")
+# --- CONFIGURAÇÃO DA PÁGINA E ESTADO ---
+st.set_page_config(page_title="Adapta ONE - Editor Editorial", page_icon="📚", layout="wide")
 
-# --- FUNÇÕES DE LÓGICA ---
+# Inicializa o estado da sessão para persistir os dados
+def inicializar_estado():
+    chaves_estado = {
+        "text_content": "", "file_processed": False, "last_uploaded_file_id": None,
+        "book_title": "Sem Título", "author_name": "Autor Desconhecido",
+        "correcoes_gramaticais": None, "sugestoes_estilo": None,
+        "metadados_gerados": None
+    }
+    for key, value in chaves_estado.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
+inicializar_estado()
+
+# --- FUNÇÕES DE PROCESSAMENTO (BACKEND) ---
+
+# Cache para carregar o modelo de linguagem pesado apenas uma vez
 @st.cache_resource
 def carregar_ferramenta_gramatical():
-    """Carrega o modelo de linguagem (pesado) apenas uma vez."""
+    st.write("Carregando modelo de revisão gramatical (apenas na primeira vez)...")
     return language_tool_python.LanguageTool('pt-BR')
 
-def analisar_texto(texto: str):
-    if not texto: return None
-    palavras = texto.split()
-    return {"Contagem de Palavras": len(palavras), "Contagem de Caracteres": len(texto), "Tempo de Leitura (aprox.)": f"{math.ceil(len(palavras) / 225)} min"}
-
-def gerar_resumo_ia(texto: str):
-    if not texto: return "Erro: Não há texto para resumir."
-    try:
-        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "Você é um assistente editorial. Crie resumos concisos e impactantes."},
-                {"role": "user", "content": f"Resuma o seguinte trecho em um único parágrafo:\n\n{texto}"}
-            ],
-            temperature=0.7, max_tokens=250
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"Ocorreu um erro ao conectar com a IA: {e}"
-
-def revisar_gramatica_estilo(texto: str, ferramenta):
-    if not texto: return None
-    return ferramenta.check(texto)
-
-def limpar_e_otimizar_texto(texto: str) -> str:
-    texto = texto.replace('\r\n', '\n').replace('\r', '\n')
-    texto = re.sub(r' +', ' ', texto)
-    texto = smartypants.smartypants(texto, 2) # Attr 2 para aspas e travessões
+def limpar_e_otimizar_tipografia(texto: str) -> str:
+    # Aplica aspas curvas, travessões e outras melhorias tipográficas
+    texto = smartypants.smartypants(texto, 2)
+    # Garante que travessões de diálogo sejam formatados corretamente
     texto = re.sub(r'^\s*-\s+', '— ', texto, flags=re.MULTILINE)
+    # Normaliza espaços e quebras de linha
+    texto = re.sub(r' +', ' ', texto)
     texto = re.sub(r'\n{3,}', '\n\n', texto)
     return texto.strip()
 
+# Ponto 2: Revisão Ortográfica e Gramatical
+def revisar_gramatica_estilo(texto: str, ferramenta):
+    return ferramenta.check(texto)
+
+# Ponto 3 & 6: Análise de Estilo e Consistência (via IA)
+def gerar_sugestoes_estilo_ia(texto: str, client: OpenAI):
+    prompt = f"""
+    Analise o seguinte trecho de texto como um editor literário sênior.
+    Forneça 3 a 5 sugestões concisas para melhorar o estilo, clareza, concisão ou impacto.
+    Identifique também possíveis inconsistências simples (ex: "Maria" vs "Marta").
+    Apresente cada sugestão em um novo parágrafo, começando com 'Sugestão:'.
+
+    Texto:
+    ---
+    {texto}
+    """
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.5,
+    )
+    return response.choices[0].message.content.split('Sugestão:')[1:]
+
+# Ponto 7: Geração de Metadados
+def gerar_metadados_ia(texto: str, client: OpenAI):
+    prompt = f"""
+    Com base no manuscrito a seguir, gere os seguintes metadados para um livro:
+    1. Título Sugerido: [Um título criativo e relevante]
+    2. Palavras-chave: [Uma lista de 5 a 7 palavras-chave separadas por vírgula]
+    3. Sinopse (150 palavras): [Uma sinopse envolvente para a contracapa]
+
+    Manuscrito:
+    ---
+    {texto}
+    """
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+    )
+    # Extrai os dados da resposta
+    content = response.choices[0].message.content
+    try:
+        titulo = re.search(r"Título Sugerido: (.*?)\n", content).group(1)
+        palavras_chave = re.search(r"Palavras-chave: (.*?)\n", content).group(1)
+        sinopse = re.search(r"Sinopse \$150 palavras\$: (.*)", content, re.DOTALL).group(1)
+        return {"titulo": titulo, "palavras_chave": palavras_chave, "sinopse": sinopse}
+    except AttributeError:
+        return {"titulo": "Não foi possível gerar", "palavras_chave": "Não foi possível gerar", "sinopse": content}
+
+# Ponto 4, 5 e 8: Formatação e Exportação para .DOCX
 def gerar_manuscrito_final_docx(titulo: str, autor: str, texto_manuscrito: str):
-    texto_limpo = limpar_e_otimizar_texto(texto_manuscrito)
+    texto_final = limpar_e_otimizar_tipografia(texto_manuscrito)
     document = Document()
 
-    # --- Página de Rosto ---
+    # Ponto 4: Define margens
+    for section in document.sections:
+        section.top_margin = Inches(1)
+        section.bottom_margin = Inches(1)
+        section.left_margin = Inches(1)
+        section.right_margin = Inches(1)
+
+    # Adiciona Página de Rosto
     p_titulo = document.add_paragraph()
     p_titulo.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    runner = p_titulo.add_run(titulo.upper())
-    runner.font.name = 'Times New Roman'
-    runner.font.size = Pt(16)
-    runner.bold = True
+    p_titulo.add_run(titulo.upper()).bold = True
+    p_titulo.runs[0].font.size = Pt(16)
+    p_titulo.runs[0].font.name = 'Times New Roman'
     
-    document.add_paragraph() # Espaçamento
-    
+    document.add_paragraph("\n\n\n\n") # Espaçamento
     p_autor = document.add_paragraph()
     p_autor.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    runner_autor = p_autor.add_run(autor)
-    runner_autor.font.name = 'Times New Roman'
-    runner_autor.font.size = Pt(12)
-
+    p_autor.add_run(autor).font.size = Pt(12)
+    p_autor.runs[0].font.name = 'Times New Roman'
     document.add_page_break()
 
-    # --- Corpo do Texto ---
-    style = document.styles['Normal']
-    style.font.name = 'Times New Roman'
-    style.font.size = Pt(12)
-    style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    style.paragraph_format.line_spacing_rule = WD_LINE_SPACING.ONE_POINT_FIVE
-    style.paragraph_format.first_line_indent = Cm(1.25)
-    style.paragraph_format.space_after = Pt(0)
-    
-    paragrafos = texto_limpo.split('\n\n')
-    for para_texto in paragrafos:
-        if para_texto.strip():
-            document.add_paragraph(para_texto.strip())
-
-    buffer = io.BytesIO()
-    document.save(buffer)
-    buffer.seek(0)
-    return buffer
-
-# --- INTERFACE DO USUÁRIO ---
-
-st.title("Adapta ONE - Editor Editorial Completo 📚")
-st.markdown("Carregue seu manuscrito, utilize as ferramentas de IA e revisão, e baixe a versão final pronta para publicação.")
-
-# --- Barra Lateral para Informações do Livro ---
-with st.sidebar:
-    st.header("Informações do Manuscrito")
-    st.session_state.book_title = st.text_input("Título do Livro", st.session_state.get("book_title", "Sem Título"))
-    st.session_state.author_name = st.text_input("Nome do Autor(a)", st.session_state.get("author_name", "Autor Desconhecido"))
-    st.divider()
-    st.info("O título e o autor serão usados na página de rosto do documento final.")
-
-# --- Inicialização do Estado da Sessão ---
-if 'text_content' not in st.session_state: st.session_state.text_content = ""
-if 'file_processed' not in st.session_state: st.session_state.file_processed = False
-if 'last_uploaded_file_id' not in st.session_state: st.session_state.last_uploaded_file_id = None
-if 'resumo_gerado' not in st.session_state: st.session_state.resumo_gerado = None
-if 'analise_resultados' not in st.session_state: st.session_state.analise_resultados = None
-if 'correcoes_gramaticais' not in st.session_state: st.session_state.correcoes_gramaticais = None
-
-# --- Upload e Área de Edição ---
-uploaded_file = st.file_uploader("1. Carregue seu arquivo (.txt ou .docx)", type=["txt", "docx"])
-
-if uploaded_file is not None:
-    current_file_id = f"{uploaded_file.name}-{uploaded_file.size}"
-    if st.session_state.last_uploaded_file_id != current_file_id:
-        st.session_state.last_uploaded_file_id = current_file_id
-        # Limpa todos os resultados antigos ao carregar um novo arquivo
-        st.session_state.resumo_gerado = None
-        st.session_state.analise_resultados = None
-        st.session_state.correcoes_gramaticais = None
-        with st.spinner("Processando arquivo..."):
-            if uploaded_file.name.endswith('.txt'):
-                st.session_state.text_content = io.StringIO(uploaded_file.getvalue().decode("utf-8")).read()
-            elif uploaded_file.name.endswith('.docx'):
-                doc = Document(io.BytesIO(uploaded_file.read()))
-                st.session_state.text_content = "\n\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-            st.session_state.file_processed = True
-
-if st.session_state.file_processed:
-    st.text_area("Seu Manuscrito (editável):", value=st.session_state.text_content, height=500, key="editor_texto")
-    st.session_state.text_content = st.session_state.editor_texto # Atualiza o estado com as edições
-
-    st.divider()
-    st.header("2. Ferramentas de Análise e Revisão")
-
-    cols_botoes = st.columns(3)
-    with cols_botoes[0]:
-        if st.button("Analisar Texto"):
-            with st.spinner("Analisando métricas..."):
-                st.session_state.analise_resultados = analisar_texto(st.session_state.text_content)
-    with cols_botoes[1]:
-        if st.button("Revisar Gramática e Estilo"):
-            with st.spinner("Buscando por erros e sugestões..."):
-                tool = carregar_ferramenta_gramatical()
-                st.session_state.correcoes_gramaticais = revisar_gramatica_estilo(st.session_state.text_content, tool)
-    with cols_botoes[2]:
-        if st.button("Gerar Resumo (IA)"):
-            with st.spinner("🤖 A IA está lendo seu texto para criar um resumo..."):
-                st.session_state.resumo_gerado = gerar_resumo_ia(st.session_state.text_content[:15000])
-
-    # --- Área de Resultados Persistentes com Expanders ---
-    if st.session_state.analise_resultados or st.session_state.correcoes_gramaticais or st.session_state.resumo_gerado:
-        st.subheader("Resultados")
-        
-        if st.session_state.analise_resultados:
-            with st.expander("Análise do Texto", expanded=True):
-                for metrica, valor in st.session_state.analise_resultados.items():
-                    st.metric(label=metrica, value=valor)
-        
-        if st.session_state.correcoes_gramaticais:
-            with st.expander(f"Revisão Gramatical ({len(st.session_state.correcoes_gramaticais)} problemas encontrados)", expanded=True):
-                for erro in st.session_state.correcoes_gramaticais:
-                    st.markdown(f"- **Problema:** {erro.message} (Regra: `{erro.ruleId}`)")
-                    st.markdown(f"  - **No trecho:** `...{erro.context}...`")
-                    if erro.replacements:
-                        st.markdown(f"  - **Sugestões:** {', '.join(erro.replacements)}")
-                    st.divider()
-
-        if st.session_state.resumo_gerado:
-            with st.expander("Resumo Gerado pela IA", expanded=True):
-                st.success(st.session_state.resumo_gerado)
-    
-    st.divider()
-    st.header("3. Baixar o Manuscrito Final")
-    
-    # --- Botão de Download Final ---
-    if st.session_state.text_content:
-        docx_buffer = gerar_manuscrito_final_docx(st.session_state.book_title, st.session_state.author_name, st.session_state.text_content)
-        st.download_button(
-            label="BAIXAR MANUSCRITO FINAL (.DOCX)",
-            data=docx_buffer,
-            file_name=f"{st.session_state.book_title}_formatado.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            type="primary",
-            use_container_width=True
-        )
-else:
-    st.info("Aguardando o carregamento de um arquivo para começar a mágica.")
+    # Ponto 4: Define estilo do corpo do texto
