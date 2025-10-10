@@ -67,11 +67,10 @@ except Exception as e:
         return "".join(difflib.unified_diff(a.splitlines(True), b.splitlines(True), fromfile=fromfile, tofile=tofile))
     def get_fastformat_default_options():
         return FastFormatOptions(
-            aspas_padrao=True, reticencias=True, hifen_travessao=True,
-            espacos_dup=True, pontuacao_espaco=True, linhas_brancas_excesso=True,
-            limpar_espacos_finais=True, dialogue_dash="emdash", number_range_dash="endash",
-            quotes_style="curly", normalize_bullets=True, smart_ptbr_punctuation=True,
-            ensure_final_newline=True, trim_line_spaces=True, collapse_blank_lines=True
+            quotes_style="curly", dialogue_dash="emdash", number_range_dash="endash",
+            normalize_whitespace=True, trim_line_spaces=True, collapse_blank_lines=True,
+            ensure_final_newline=True, normalize_ellipsis=True, smart_ptbr_punctuation=True,
+            normalize_bullets=True, safe_mode=True
         )
 
 
@@ -329,11 +328,12 @@ def fastformat_tab_ui(st_obj, session_state_obj):
         opt.ensure_final_newline = st_obj.checkbox("Garantir quebra de linha final", value=getattr(opt, "ensure_final_newline", True), help="Adiciona uma quebra de linha no final do texto se ausente.")
     with col2:
         st_obj.markdown("##### Pontuação e Tipografia")
+        # CORREÇÃO AQUI: String literal da format_func estava incorreta.
         opt.quotes_style = st_obj.radio(
             "Estilo de aspas",
             options=["curly", "straight"],
             index=0 if getattr(opt, "quotes_style", "curly") == "curly" else 1,
-            format_func=lambda x: "Tipográficas (“ ” e ‘ ’)" if x == "curly" else "Retas (" e ')".replace("'", "\'"),
+            format_func=lambda x: "Tipográficas (“ ” e ‘ ’)" if x == "curly" else 'Retas (" e \')', # CORRIGIDO
             horizontal=True,
             key="ff_quotes_style_radio"
         )
@@ -579,8 +579,8 @@ def tab_export():
     st.write("Exporte seu manuscrito em diferentes formatos, com base nas configurações.")
 
     texto_final = st.session_state.get("texto_principal", "")
-    current_title = st.session_state.get("book_title", "Livro Sem Título")
-    current_author = st.session_state.get("book_author", "Autor Desconhecido")
+    current_title = st.session_state.get("book_title", "Livro sem título")
+    current_author = st.session_state.get("book_author", "Autor desconhecido")
     current_style = st.session_state.get("style_option", "Romance Clássico (Garamond)")
     current_kdp_size = st.session_state.get("kdp_size_key", "KDP 6 x 9 in (152 x 229 mm)")
 
