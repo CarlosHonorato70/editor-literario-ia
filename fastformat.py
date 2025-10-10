@@ -32,16 +32,26 @@ def get_fastformat_default_options() -> FastFormatOptions:
 def _to_curly_quotes(text: str, pt_br_style: bool = True) -> str:
     # Aspas duplas
     # Abertura em pt-BR (com base em contexto)
-    text = re.sub(r'(^|[^\w"])(")', r'\1“', text)
+    text = re.sub(r'(^|[\s(\[{<])(")', r'\1“', text)
     # Fechamento em pt-BR
-    text = re.sub(r'(")([^\w"]|$)', r'”\2', text)
+    text = re.sub(r'(")([\s).\]}>]|$)', r'”\2', text) # Ajustado para fechar aspas duplas de forma mais robusta
+
     # Aspas simples (apostrofo vs aspas)
     text = re.sub(r"(\w)'(\w)", r"\1’\2", text) # Contração
-    text = re.sub(r"(^|[^\w'])(')(\s)", r"\1‘\3", text) # Abertura simples
-    text = text.replace("'", "’") # Resto vira fechamento simples
+    text = re.sub(r"(^|[\s(\[{<])(')(\s)", r"\1‘\3", text) # Abertura simples
+    text = text.sub(r"([^\s])(')", r"\1’", text) # Fechamento simples se não for abertura e não for contração
+
+    # Correção para apostrofo inicial em palavras (ex: 's algo)
+    text = re.sub(r"(\s|^)'(\w)", r"\1‘\2", text)
+    
+    # Garantir que aspas restantes sejam fechadas como '”' ou '’'
+    text = text.replace('"', '”')
+    text = text.replace("'", "’")
     return text
 
+
 def _to_straight_quotes(text: str) -> str:
+    # Converte aspas tipográficas para retas
     replacements = {
         "“": '"', "”": '"',
         "‘": "'", "’": "'"
