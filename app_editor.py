@@ -1,434 +1,476 @@
+# -*- coding: utf-8 -*-
+"""
+Editor Pro IA: Publicação Sem Complicações
+Otimizado para GitHub: Um Assistente Completo de Edição, Revisão, Design e Formatação de Livros
+
+- Configuração Inicial: Título, autor, formato KDP/Gráfica (miolo), template de estilo de texto
+- Manuscrito: Upload .txt/.docx, edição ao vivo
+- Revisão IA: ortografia, clareza, tom literário, resumo, sinopse de marketing
+- Capa (brief): ideias e diretrizes textuais por IA (sem geração de imagem direta)
+- Exportação: DOCX com estilos, EPUB/PDF placeholders desativados (como no código antigo)
+- FastFormat: microtipografia, aspas, travessões, NBSP, normalizações; diff e aplicação ao manuscrito
+"""
+
 import os
 import io
 import re
+import json
+import time
+import math
 import difflib
-import base64
-from datetime import datetime
-
+import requests
 import streamlit as st
+from io import BytesIO
+from typing import Optional, Dict, Any, Tuple, List
 
+# IA
 try:
     from openai import OpenAI
-    OPENAI_AVAILABLE = True
 except Exception:
-    OPENAI_AVAILABLE = False
-    OpenAI = None  # type: ignore
+    OpenAI = None
 
+# DOCX
+from docx import Document
+from docx.shared import Pt, Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.style import WD_STYLE_TYPE
+
+# FastFormat (será fornecido em fastformat.py na próxima etapa)
+# Se ainda não existir, o app exibirá um aviso na seção correspondente.
 try:
-    from docx import Document
-    DOCX_AVAILABLE = True
+    from fastformat import FastFormatOptions, apply_fastformat, make_unified_diff, default_options
+    FASTFORMAT_AVAILABLE = True
 except Exception:
-    DOCX_AVAILABLE = False
-    Document = None  # type: ignore
+    FASTFORMAT_AVAILABLE = False
+    FastFormatOptions = Any
+    def apply_fastformat(text: str, options: Dict[str, Any]) -> str:
+        return text
+    def make_unified_diff(a: str, b: str, fromfile: str = "original", tofile: str = "formatado") -> str:
+        return "".join(difflib.unified_diff(a.splitlines(True), b.splitlines(True), fromfile=fromfile, tofile=tofile))
+    default_options = {
+        "aspas": "pt_curly",
+        "travessao": "mdash",
+        "normalize_spaces": True,
+        "nbsp_abreviacoes": True,
+        "nbsp_numeros_unidades": True,
+        "reticencias": True,
+        "hifens_range": True,
+        "pontuacao_espacos": True,
+        "linhas_brancas_excesso": True,
+        "limpar_espacos_finais": True,
+    }
 
+# ------------------------------------------------------------------------------------
+# CONSTANTES E PRESETS
+# ------------------------------------------------------------------------------------
 
-# =========================
-# Configurações e Templates
-# =========================
+APP_TITLE = "Editor Pro IA: Publicação Sem Complicações"
+APP_SUBTITLE = "Edição, revisão, diagramação e formatação de livros (ABNT e KDP) com IA"
 
-STYLE_TEMPLATES = {
-    "padrao_br": {
-        "label": "Padrão BR (neutro)",
-        "normalize_spaces": True,
-        "normalize_ellipses": True,
-        "typographic_dashes": True,
-        "quotes_style": "typographic",  # typographic | straight
-        "remove_double_blank_lines": True,
+# Tamanhos KDP/Gráfica (Miolo)
+KDP_SIZES: Dict[str, Dict[str, float]] = {
+    "KDP 6 x 9 in (152 x 229 mm)": {"width_in": 6.0, "height_in": 9.0, "margin_in": 0.75},
+    "KDP 5.5 x 8.5 in (140 x 216 mm)": {"width_in": 5.5, "height_in": 8.5, "margin_in": 0.75},
+    "KDP 5 x 8 in (127 x 203 mm)": {"width_in": 5.0, "height_in": 8.0, "margin_in": 0.75},
+    "KDP 7 x 10 in (178 x 254 mm)": {"width_in": 7.0, "height_in": 10.0, "margin_in": 0.75},
+    "A5 148 x 210 mm (~5.83 x 8.27 in)": {"width_in": 5.83, "height_in": 8.27, "margin_in": 0.79},
+}
+
+# Templates de estilo (exemplos básicos)
+STYLE_TEMPLATES: Dict[str, Dict[str, Any]] = {
+    "Romance Clássico (Garamond)": {
+        "font_name": "Garamond",
+        "font_size_pt": 12,
+        "line_spacing": 1.25,
+        "space_after_pt": 6,
+        "justify": True,
+        "first_line_indent_in": 0.25,
     },
-    "abnt": {
-        "label": "ABNT (básico textual)",
-        "normalize_spaces": True,
-        "normalize_ellipses": True,
-        "typographic_dashes": True,
-        "quotes_style": "straight",
-        "remove_double_blank_lines": True,
+    "ABNT Acadêmico (Times New Roman)": {
+        "font_name": "Times New Roman",
+        "font_size_pt": 12,
+        "line_spacing": 1.5,
+        "space_after_pt": 0,
+        "justify": True,
+        "first_line_indent_in": 0.0,
     },
-    "apa": {
-        "label": "APA (básico textual)",
-        "normalize_spaces": True,
-        "normalize_ellipses": True,
-        "typographic_dashes": True,
-        "quotes_style": "typographic",
-        "remove_double_blank_lines": True,
-    },
-    "jornalistico": {
-        "label": "Jornalístico (BR)",
-        "normalize_spaces": True,
-        "normalize_ellipses": True,
-        "typographic_dashes": True,
-        "quotes_style": "straight",
-        "remove_double_blank_lines": True,
+    "Didático Digital (Inter)": {
+        "font_name": "Inter",
+        "font_size_pt": 11,
+        "line_spacing": 1.4,
+        "space_after_pt": 4,
+        "justify": False,
+        "first_line_indent_in": 0.0,
     },
 }
 
+# ------------------------------------------------------------------------------------
+# FUNÇÕES DE SUPORTE
+# ------------------------------------------------------------------------------------
 
-# =========================
-# Utilidades de IO
-# =========================
-
-def read_text_file(uploaded_file) -> str:
-    content = uploaded_file.read()
+def get_openai_client() -> Optional[Any]:
+    if OpenAI is None:
+        return None
     try:
-        return content.decode("utf-8")
-    except UnicodeDecodeError:
-        try:
-            return content.decode("latin-1")
-        except UnicodeDecodeError:
-            return content.decode("utf-8", errors="ignore")
+        # Usa variável de ambiente OPENAI_API_KEY ou st.secrets["OPENAI_API_KEY"]
+        api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", None)
+        if api_key:
+            os.environ["OPENAI_API_KEY"] = api_key
+        client = OpenAI()
+        return client
+    except Exception:
+        return None
 
-
-def read_docx_file(uploaded_file) -> str:
-    if not DOCX_AVAILABLE:
-        st.error("python-docx não está instalado. Instale com: pip install python-docx")
+def load_text_from_file(uploaded_file) -> str:
+    if uploaded_file is None:
         return ""
-    # Carrega o arquivo em memória
-    data = uploaded_file.read()
-    bio = io.BytesIO(data)
-    doc = Document(bio)
-    paragraphs = [p.text for p in doc.paragraphs]
-    return "\n".join(paragraphs)
+    name = uploaded_file.name.lower()
+    if name.endswith(".txt"):
+        return uploaded_file.read().decode("utf-8", errors="ignore")
+    if name.endswith(".docx"):
+        doc = Document(uploaded_file)
+        paras = []
+        for p in doc.paragraphs:
+            paras.append(p.text)
+        return "\n".join(paras)
+    return ""
 
+def split_paragraphs_preserving(text: str) -> List[str]:
+    # Divide por duplas quebras para preservar parágrafos em branco
+    parts = re.split(r"\n\s*\n", text.strip(), flags=re.MULTILINE)
+    return [p.strip("\n") for p in parts]
 
-def export_docx(text: str) -> bytes:
-    if not DOCX_AVAILABLE:
-        st.error("python-docx não está instalado. Instale com: pip install python-docx")
-        return b""
+def apply_style_to_document(doc: Document, style_key: str):
+    tpl = STYLE_TEMPLATES.get(style_key, STYLE_TEMPLATES["Romance Clássico (Garamond)"])
+    base_style = doc.styles["Normal"]
+    font = base_style.font
+    font.name = tpl["font_name"]
+    font.size = Pt(tpl["font_size_pt"])
+
+    # Ajusta parágrafo normal
+    para_format = base_style.paragraph_format
+    para_format.line_spacing = tpl["line_spacing"]
+    para_format.space_after = Pt(tpl["space_after_pt"])
+
+def set_page_kdp(doc: Document, kdp_key: str):
+    cfg = KDP_SIZES.get(kdp_key, KDP_SIZES["KDP 6 x 9 in (152 x 229 mm)"])
+    for section in doc.sections:
+        section.page_width = Inches(cfg["width_in"])
+        section.page_height = Inches(cfg["height_in"])
+        mg = cfg["margin_in"]
+        section.left_margin = Inches(mg)
+        section.right_margin = Inches(mg)
+        section.top_margin = Inches(mg)
+        section.bottom_margin = Inches(mg)
+
+def add_text_as_paragraphs(doc: Document, text: str, style_key: str):
+    tpl = STYLE_TEMPLATES.get(style_key, STYLE_TEMPLATES["Romance Clássico (Garamond)"])
+    justify = tpl.get("justify", True)
+    first_line_indent_in = tpl.get("first_line_indent_in", 0.0)
+
+    paragraphs = split_paragraphs_preserving(text)
+    for para_text in paragraphs:
+        p = doc.add_paragraph()
+        run = p.add_run(para_text)
+        if justify:
+            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        if first_line_indent_in > 0:
+            p.paragraph_format.first_line_indent = Inches(first_line_indent_in)
+
+def build_docx_from_text(text: str, title: str, author: str, style_key: str, kdp_key: str) -> BytesIO:
     doc = Document()
-    for block in text.split("\n"):
-        # Parágrafos vazios também são representados
-        doc.add_paragraph(block)
-    out = io.BytesIO()
-    doc.save(out)
-    return out.getvalue()
 
+    # Configura página
+    set_page_kdp(doc, kdp_key)
+    # Aplica estilo base
+    apply_style_to_document(doc, style_key)
 
-# =========================
-# Normalizações e Formatação
-# =========================
+    # Capa interna
+    if title or author:
+        h1 = doc.add_paragraph()
+        h1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = h1.add_run(title if title else "")
+        run.bold = True
+        run.font.size = Pt(18)
 
-def normalize_spaces(text: str) -> str:
-    # Remove espaços duplos, espaços antes de pontuação, trims de linha
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r" *([,;:.!?…])", r"\1", text)
-    text = re.sub(r"\s+\n", "\n", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)  # compacta múltiplas linhas em no máx. 2
-    # Remove espaços no início/fim de cada linha
-    text = "\n".join([line.strip() for line in text.splitlines()])
-    return text
+        if author:
+            h2 = doc.add_paragraph()
+            h2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run2 = h2.add_run(author)
+            run2.italic = True
+            run2.font.size = Pt(12)
 
+        doc.add_page_break()
 
-def normalize_ellipses(text: str) -> str:
-    # Normaliza reticências: três pontos no formato …
-    text = re.sub(r"\.\.\.+", "…", text)
-    # Garante espaço antes/depois se necessário
-    text = re.sub(r"\s*…\s*", " … ", text)
-    # Compacta espaços
-    text = re.sub(r"\s{2,}", " ", text)
-    return text.strip()
+    # Miolo
+    add_text_as_paragraphs(doc, text, style_key)
 
+    bio = BytesIO()
+    doc.save(bio)
+    bio.seek(0)
+    return bio
 
-def to_typographic_quotes(text: str) -> str:
-    # Converte aspas retas para tipográficas de forma simples/heurística.
-    # Nota: solução heurística; casos complexos podem não ficar perfeitos.
-    result = []
-    double_is_open = True
-    single_is_open = True
-    for ch in text:
-        if ch == '"':
-            result.append("“" if double_is_open else "”")
-            double_is_open = not double_is_open
-        elif ch == "'":
-            result.append("‘" if single_is_open else "’")
-            single_is_open = not single_is_open
-        else:
-            result.append(ch)
-    return "".join(result)
+def ai_transform_text(
+    client: Any,
+    text: str,
+    task: str = "revisao",
+    tone: str = "neutro",
+    extras: Optional[str] = None,
+) -> str:
+    if client is None:
+        return "Configure sua OPENAI_API_KEY para usar a revisão por IA."
+    if not text.strip():
+        return "Cole ou carregue seu manuscrito primeiro."
 
-
-def to_straight_quotes(text: str) -> str:
-    text = text.replace("“", '"').replace("”", '"')
-    text = text.replace("‘", "'").replace("’", "'")
-    return text
-
-
-def typographic_dashes(text: str) -> str:
-    # Substitui -- por — (travessão), preservando espaços apropriados
-    text = re.sub(r"\s?--\s?", " — ", text)
-    # Normaliza espaços em torno do travessão
-    text = re.sub(r"\s*—\s*", " — ", text)
-    # Remove espaços duplicados
-    text = re.sub(r"\s{2,}", " ", text)
-    # Ajusta travessão no início de fala
-    text = re.sub(r"^\s*-\s+", "— ", text, flags=re.MULTILINE)
-    return text.strip()
-
-
-def remove_double_blank_lines(text: str) -> str:
-    return re.sub(r"\n{3,}", "\n\n", text)
-
-
-def apply_local_formatting(text: str, opts: dict) -> str:
-    out = text
-
-    if opts.get("normalize_spaces"):
-        out = normalize_spaces(out)
-
-    if opts.get("normalize_ellipses"):
-        out = normalize_ellipses(out)
-
-    if opts.get("typographic_dashes"):
-        out = typographic_dashes(out)
-
-    quotes_style = opts.get("quotes_style", "typographic")
-    if quotes_style == "typographic":
-        out = to_typographic_quotes(out)
-    else:
-        out = to_straight_quotes(out)
-
-    if opts.get("remove_double_blank_lines"):
-        out = remove_double_blank_lines(out)
-
-    return out.strip()
-
-
-def apply_ai_refinement(text: str, opts: dict, tone_hint: str = "") -> str:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not (OPENAI_AVAILABLE and api_key):
-        st.warning("OPENAI_API_KEY não configurada ou SDK indisponível. Pulando etapa de IA.")
-        return text
-
-    client = OpenAI(api_key=api_key)
-
-    # Monta um breve prompt de instruções
-    template_label = opts.get("template_label", "Padrão BR")
-    quotes = opts.get("quotes_style", "typographic")
-    dash_pref = "travessão" if opts.get("typographic_dashes") else "hífen"
-    ellipses_pref = "use reticências como …" if opts.get("normalize_ellipses") else "mantenha reticências como '...'"
-    quotes_pref = "aspas tipográficas" if quotes == "typographic" else "aspas retas"
-    tone = tone_hint or "mantenha o tom e o conteúdo original"
-
-    system_msg = (
-        "Você é um formatter de texto. Aplique APENAS formatação e microedição, "
-        "sem reescrever ou alterar conteúdo."
+    # Prompts de sistema e usuário
+    system_base = (
+        "Você é um editor literário brasileiro experiente. "
+        "Revise mantendo a voz do autor, aplique português brasileiro, e aponte mudanças relevantes quando solicitado."
     )
-    user_msg = f"""
-Regras:
-- Template: {template_label}
-- Aspas: {quotes_pref}
-- Dashes: {dash_pref}
-- Reticências: {ellipses_pref}
-- {tone}
+    if task == "revisao":
+        user = f"Revise ortografia, concordância e pontuação, preservando estilo. Texto:\n\n{text}"
+    elif task == "clareza":
+        user = f"Reescreva para máxima clareza e fluidez, mantendo o tom {tone}. Texto:\n\n{text}"
+    elif task == "tom":
+        user = f"Ajuste o tom literário para {tone}, sem perder a voz autoral. Texto:\n\n{text}"
+    elif task == "resumo":
+        user = f"Resuma o texto em 3 versões: 1 frase, 1 parágrafo e 3 parágrafos. Texto:\n\n{text}"
+    elif task == "sinopse":
+        user = (
+            "Escreva uma sinopse de marketing atraente (120-180 palavras) para a contracapa e Amazon. "
+            f"Considere o tom {tone}. Texto-base:\n\n{text}"
+        )
+    else:
+        user = f"Faça uma revisão geral do texto, mantendo o tom {tone}. Texto:\n\n{text}"
 
-Instruções:
-- Não adicione nem remova ideias.
-- Não resuma.
-- Preserve quebras de linha.
-- Retorne somente o texto final formatado, sem explicações.
-
-Texto:
-{text}
-""".strip()
+    if extras:
+        user += f"\n\nInstruções extras do autor: {extras}"
 
     try:
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini",
+        # Modelos recomendados (ajuste conforme necessário)
+        # Exemplos: "gpt-4o-mini", "gpt-4o"
+        model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        resp = client.chat.completions.create(
+            model=model_name,
             messages=[
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": user_msg},
+                {"role": "system", "content": system_base},
+                {"role": "user", "content": user},
             ],
-            temperature=0.1,
+            temperature=0.4,
         )
-        ai_text = completion.choices[0].message.content if completion.choices else ""
-        return ai_text.strip() if ai_text else text
+        return resp.choices[0].message.content.strip()
     except Exception as e:
-        st.error(f"Falha na etapa de IA: {e}")
-        return text
+        return f"Erro ao chamar o modelo: {e}"
 
-
-# =========================
-# Diff e Exibição
-# =========================
-
-def render_html_diff(a: str, b: str) -> str:
-    # Gera uma tabela HTML com difflib.HtmlDiff
-    a_lines = a.splitlines()
-    b_lines = b.splitlines()
-    differ = difflib.HtmlDiff(wrapcolumn=80)
-    html = differ.make_table(
-        fromlines=a_lines,
-        tolines=b_lines,
-        fromdesc="Original",
-        todesc="Formatado",
-        context=True,
-        numlines=2,
+def cover_brief_by_ai(client: Any, title: str, author: str, genre: str, synopsis: str) -> str:
+    if client is None:
+        return "Configure sua OPENAI_API_KEY para gerar o brief por IA."
+    prompt = (
+        "Crie um brief de capa para um livro. Inclua: público-alvo, referências visuais, paleta de cores, tipografia sugerida, "
+        "elementos-chave e 3 variações de direção de arte (clean, artística e comercial). "
+        "Evite clichês e informe restrições KDP (sangria, margens de segurança). "
+        f"Título: {title}\nAutor: {author}\nGênero: {genre}\nSinopse:\n{synopsis}\n"
     )
-    style = """
-    <style>
-      table.diff { font-family: monospace; border: 1px solid #ddd; border-collapse: collapse; width: 100%; }
-      .diff_header { background: #f6f8fa; }
-      td, th { padding: 4px 6px; border: 1px solid #eee; vertical-align: top; }
-      .diff_add { background: #e6ffed; }
-      .diff_chg { background: #fff5b1; }
-      .diff_sub { background: #ffeef0; }
-    </style>
-    """
-    return style + html
-
-
-# =========================
-# UI - Streamlit
-# =========================
-
-st.set_page_config(page_title="FastFormat — Editor Literário IA", layout="wide")
-
-st.title("FastFormat — Editor Literário IA")
-st.caption("Pré-visualize, compare, aplique e exporte formatações de texto de forma rápida.")
-
-with st.sidebar:
-    st.header("Configuração Inicial")
-
-    # Template de Estilo (corrigido, string fechada)
-    template_keys = list(STYLE_TEMPLATES.keys())
-    template_labels = [STYLE_TEMPLATES[k]["label"] for k in template_keys]
-    default_index = 0
-
-    style_key = st.selectbox(
-        "Template de Estilo",
-        options=template_keys,
-        index=default_index,
-        format_func=lambda k: STYLE_TEMPLATES[k]["label"],
-        help="Escolha um template de formatação base.",
-    )
-
-    base_opts = STYLE_TEMPLATES[style_key].copy()
-    base_opts["template_label"] = base_opts.get("label", "Padrão BR")
-
-    st.subheader("Ajustes finos")
-
-    # Estilo de aspas (corrigido: atribuição, format_func e aspas internas)
-    quotes_style = st.radio(
-        "Estilo de aspas",
-        options=["typographic", "straight"],
-        index=0 if base_opts.get("quotes_style") == "typographic" else 1,
-        format_func=lambda x: 'Tipográficas ("","")' if x == "typographic" else 'Retas ("","")',
-        help='Tipográficas: “ ” e ‘ ’. Retas: " e \'.',
-    )
-
-    normalize_spaces_opt = st.checkbox(
-        "Normalizar espaços e espaçamentos de pontuação",
-        value=bool(base_opts.get("normalize_spaces", True)),
-    )
-    normalize_ellipses_opt = st.checkbox(
-        "Normalizar reticências (…)",
-        value=bool(base_opts.get("normalize_ellipses", True)),
-    )
-    dashes_opt = st.checkbox(
-        "Usar travessões tipográficos (—) e padronizar diálogos",
-        value=bool(base_opts.get("typographic_dashes", True)),
-    )
-    remove_blank_lines_opt = st.checkbox(
-        "Compactar múltiplas linhas vazias",
-        value=bool(base_opts.get("remove_double_blank_lines", True)),
-    )
-
-    use_ai = st.checkbox(
-        "Usar IA para refinar o estilo sem alterar o conteúdo",
-        value=False,
-        help="Requer OPENAI_API_KEY configurada no ambiente.",
-    )
-    tone_hint = ""
-    if use_ai:
-        tone_hint = st.text_input(
-            "Dica de tom (opcional)",
-            placeholder="Ex.: manter tom literário, fluidez sutil, sem alterar conteúdo"
+    try:
+        model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        resp = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": "Você é um diretor de arte e designer de capas experiente."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.7,
         )
+        return resp.choices[0].message.content.strip()
+    except Exception as e:
+        return f"Erro ao chamar o modelo: {e}"
 
-    st.markdown("---")
-    st.caption("Dica: Você pode colar um texto abaixo ou enviar um arquivo .txt / .docx no corpo do app.")
+# ------------------------------------------------------------------------------------
+# FASTFORMAT UI SECTION
+# ------------------------------------------------------------------------------------
 
-# Entrada de texto/arquivo
-st.subheader("Entrada")
-col1, col2 = st.columns([2, 1])
+def fastformat_section(texto_existente: str) -> str:
+    st.markdown("### FastFormat")
+    if not FASTFORMAT_AVAILABLE:
+        st.info(
+            "Módulo fastformat não encontrado. Após você adicionar o arquivo fastformat.py ao repositório, "
+            "esta seção habilitará as transformações de microtipografia, aspas e travessões com diff."
+        )
+        return texto_existente
 
-with col1:
-    text_input = st.text_area(
-        "Cole seu texto aqui",
-        height=260,
-        placeholder="Cole seu texto ou use o upload ao lado...",
+    # Estado inicial das opções
+    if "fastformat_options" not in st.session_state:
+        st.session_state["fastformat_options"] = dict(default_options)
+
+    opts = st.session_state["fastformat_options"]
+
+    col1, col2, col3 = st.columns([1, 1, 1])
+
+    with col1:
+        aspas = st.radio(
+            "Estilo de aspas",
+            options=[
+                ("pt_curly", "Português (“ ”)"),
+                ("en_curly", "Inglês (“ ”)"),
+                ("single_curly", "Simples (‘ ’)"),
+                ("straight", 'Retas (")'),
+            ],
+            index=["pt_curly", "en_curly", "single_curly", "straight"].index(opts.get("aspas", "pt_curly")),
+            format_func=lambda x: x[1] if isinstance(x, tuple) else x,
+        )
+        if isinstance(aspas, tuple):
+            aspas = aspas[0]
+        opts["aspas"] = aspas
+
+    with col2:
+        trav = st.radio(
+            "Travessão/hífen",
+            options=[("mdash", "Travessão —"), ("ndash", "Meia-risca –"), ("hyphen", "Hífen -")],
+            index=["mdash", "ndash", "hyphen"].index(opts.get("travessao", "mdash")),
+            format_func=lambda x: x[1] if isinstance(x, tuple) else x,
+        )
+        if isinstance(trav, tuple):
+            trav = trav[0]
+        opts["travessao"] = trav
+
+    with col3:
+        st.markdown("Correções automáticas")
+        opts["normalize_spaces"] = st.checkbox("Normalizar múltiplos espaços e quebras", value=opts.get("normalize_spaces", True))
+        opts["nbsp_abreviacoes"] = st.checkbox("NBSP em abreviações (Sr., Dra., Prof.)", value=opts.get("nbsp_abreviacoes", True))
+        opts["nbsp_numeros_unidades"] = st.checkbox("NBSP em números + unidade (10 km)", value=opts.get("nbsp_numeros_unidades", True))
+        opts["reticencias"] = st.checkbox("Reticências (…) em vez de ...", value=opts.get("reticencias", True))
+        opts["hifens_range"] = st.checkbox("Meia-risca (–) em intervalos numéricos", value=opts.get("hifens_range", True))
+        opts["pontuacao_espacos"] = st.checkbox("Ajustar espaços antes/depois de pontuação", value=opts.get("pontuacao_espacos", True))
+        opts["linhas_brancas_excesso"] = st.checkbox("Reduzir excesso de linhas em branco", value=opts.get("linhas_brancas_excesso", True))
+        opts["limpar_espacos_finais"] = st.checkbox("Remover espaços ao fim da linha", value=opts.get("limpar_espacos_finais", True))
+
+    st.divider()
+    if not texto_existente.strip():
+        st.warning("Cole ou carregue um texto no manuscrito para aplicar o FastFormat.")
+        return texto_existente
+
+    texto_formatado = apply_fastformat(texto_existente, opts)
+
+    # Visualização/diff
+    show_diff = st.toggle("Mostrar diff unificado", value=False)
+    if show_diff:
+        diff = make_unified_diff(texto_existente, texto_formatado, fromfile="manuscrito.txt", tofile="manuscrito_fastformat.txt")
+        st.code(diff, language="diff")
+    else:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown("Original")
+            st.text_area("Texto original", value=texto_existente, height=280, key="ff_original_textarea")
+        with col_b:
+            st.markdown("Prévia (FastFormat)")
+            st.text_area("Texto formatado (prévia)", value=texto_formatado, height=280, key="ff_formatado_textarea")
+
+    col_apply1, col_apply2 = st.columns([1, 4])
+    with col_apply1:
+        aplicar = st.button("Aplicar ao manuscrito")
+    with col_apply2:
+        st.caption("Dica: use o diff para revisar as mudanças antes de aplicar.")
+
+    if aplicar:
+        st.success("FastFormat aplicado ao manuscrito.")
+        return texto_formatado
+
+    return texto_existente
+
+# ------------------------------------------------------------------------------------
+# LAYOUT E INTERFACE
+# ------------------------------------------------------------------------------------
+
+def init_session():
+    st.session_state.setdefault("book_title", "")
+    st.session_state.setdefault("book_author", "")
+    st.session_state.setdefault("kdp_size_key", "KDP 6 x 9 in (152 x 229 mm)")
+    st.session_state.setdefault("style_option", "Romance Clássico (Garamond)")
+    st.session_state.setdefault("texto_principal", "")
+
+def sidebar_config():
+    st.sidebar.header("Configuração Inicial")
+    st.sidebar.text("Defina informações do livro e preferências do miolo.")
+
+    st.session_state["book_title"] = st.sidebar.text_input("Título do livro", value=st.session_state.get("book_title", ""))
+    st.session_state["book_author"] = st.sidebar.text_input("Autor(a)", value=st.session_state.get("book_author", ""))
+
+    # Tamanho KDP
+    kdp_keys = list(KDP_SIZES.keys())
+    cur_kdp = st.session_state.get("kdp_size_key", kdp_keys[0])
+    st.session_state["kdp_size_key"] = st.sidebar.selectbox(
+        "Formato do miolo (KDP/Gráfica)",
+        options=kdp_keys,
+        index=kdp_keys.index(cur_kdp) if cur_kdp in kdp_keys else 0,
     )
 
-with col2:
-    uploaded = st.file_uploader("Ou envie um arquivo", type=["txt", "docx"])
-    if uploaded is not None:
-        if uploaded.name.lower().endswith(".txt"):
-            text_input = read_text_file(uploaded)
-        elif uploaded.name.lower().endswith(".docx"):
-            text_input = read_docx_file(uploaded)
+    # Template de Estilo (corrigido — sem string truncada)
+    style_keys = list(STYLE_TEMPLATES.keys())
+    current_style_key = st.session_state.get("style_option", style_keys[0])
+    st.session_state["style_option"] = st.sidebar.selectbox(
+        "Template de Estilo",
+        options=style_keys,
+        index=style_keys.index(current_style_key) if current_style_key in style_keys else 0,
+    )
 
-if not text_input:
-    st.info("Insira texto na caixa acima ou envie um arquivo para começar.")
-    st.stop()
+    st.sidebar.divider()
+    st.sidebar.caption("Dica: você pode alternar o template de estilo e formato KDP a qualquer momento.")
 
-# Prepara opções consolidadas
-opts = {
-    "template_label": base_opts.get("template_label", "Padrão BR"),
-    "quotes_style": quotes_style,
-    "normalize_spaces": normalize_spaces_opt,
-    "normalize_ellipses": normalize_ellipses_opt,
-    "typographic_dashes": dashes_opt,
-    "remove_double_blank_lines": remove_blank_lines_opt,
-}
+def tab_manuscript():
+    st.subheader("Manuscrito")
+    st.write("Carregue seu arquivo ou cole o texto para começar a editar.")
 
-# Pré-visualização (local, sem IA)
-preview_text = apply_local_formatting(text_input, opts)
+    uploaded = st.file_uploader("Carregar arquivo (.txt ou .docx)", type=["txt", "docx"])
+    colu1, colu2, colu3 = st.columns([1, 1, 4])
 
-st.subheader("Pré-visualização formatada (sem IA)")
-st.text_area("Preview", value=preview_text, height=240)
+    with colu1:
+        if st.button("Ler arquivo"):
+            if uploaded:
+                st.session_state["texto_principal"] = load_text_from_file(uploaded)
+                st.success("Arquivo carregado e texto inserido no editor.")
+            else:
+                st.warning("Selecione um arquivo primeiro.")
 
-# Diff
-with st.expander("Ver Diff (Original vs. Formatado)", expanded=False):
-    html = render_html_diff(text_input, preview_text)
-    st.components.v1.html(html, height=360, scrolling=True)
+    with colu2:
+        if st.button("Limpar texto"):
+            st.session_state["texto_principal"] = ""
+            st.info("Texto limpo.")
 
-# Aplicar e Exportar
-st.markdown("---")
-st.subheader("Aplicar formatação")
+    texto_atual = st.text_area(
+        "Editor de texto",
+        value=st.session_state.get("texto_principal", ""),
+        height=400,
+        key="editor_textarea",
+    )
+    if texto_atual != st.session_state.get("texto_principal", ""):
+        st.session_state["texto_principal"] = texto_atual
 
-apply_btn = st.button("Aplicar agora", type="primary")
-final_text = preview_text
+def tab_ai_review():
+    st.subheader("Revisão por IA")
+    st.write("Selecione o tipo de revisão e aplique ao texto. É necessário configurar a OPENAI_API_KEY.")
 
-if apply_btn:
-    # Opcional: camadas — local + IA
-    if use_ai:
-        final_text = apply_ai_refinement(preview_text, opts, tone_hint=tone_hint or "")
-    else:
-        final_text = preview_text
+    client = get_openai_client()
+    tone = st.selectbox("Tom desejado", ["neutro", "poético", "informal", "acadêmico"])
+    extras = st.text_input("Instruções adicionais (opcional)")
 
-    st.success("Formatação aplicada!")
-    st.text_area("Resultado final", value=final_text, height=260)
+    col1, col2, col3, col4, col5 = st.columns(5)
+    tipo = st.radio(
+        "Tipo de tarefa",
+        options=[
+            ("revisao", "Ortografia"),
+            ("clareza", "Clareza"),
+            ("tom", "Tom literário"),
+            ("resumo", "Resumo"),
+            ("sinopse", "Sinopse (marketing)"),
+        ],
+        index=0,
+        format_func=lambda x: x[1],
+        horizontal=True,
+    )
+    if isinstance(tipo, tuple):
+        tipo = tipo[0]
 
-    # Downloads
-    colA, colB = st.columns(2)
-
-    with colA:
-        # Download TXT
-        b64 = base64.b64encode(final_text.encode("utf-8")).decode("utf-8")
-        filename_txt = f"texto_formatado_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        href = f'<a href="data:text/plain;base64,{b64}" download="{filename_txt}">⬇️ Baixar .txt</a>'
-        st.markdown(href, unsafe_allow_html=True)
-
-    with colB:
-        # Download DOCX
-        if DOCX_AVAILABLE:
-            docx_bytes = export_docx(final_text)
-            filename_docx = f"texto_formatado_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
-            st.download_button(
-                "⬇️ Baixar .docx",
-                data=docx_bytes,
-                file_name=filename_docx,
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            )
-        else:
-            st.info("Instale python-docx para exportar .docx: pip install python-docx")
-else:
-    st.caption("Clique em “Aplicar agora” para confirmar e gerar os arquivos de download.")
+    if st.button("Executar IA"):
+        with st.spinner("Gerando..."):
+            result = ai_transform_text(
+                client=
