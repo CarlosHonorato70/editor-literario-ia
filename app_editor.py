@@ -636,21 +636,22 @@ st.title(APP_TITLE)
 st.markdown(APP_SUBTITLE)
 
 # Abas do aplicativo (com a nova aba FastFormat)
-tab_manuscript, tab_ai_review, tab_cover_brief, tab_fastformat, tab_export = st.tabs(
+# CORREÇÃO AQUI: Renomeando as variáveis dos objetos das abas para evitar conflito com as funções
+_tab_manuscript, _tab_ai_review, _tab_cover_brief, _tab_fastformat, _tab_export = st.tabs(
     ["Manuscrito", "Revisão IA", "Brief Capa", "FastFormat", "Exportar"]
 )
 
-with tab_manuscript:
-    tab_manuscript()
+with _tab_manuscript: # Usando o novo nome da variável da aba
+    tab_manuscript() # Chamando a FUNÇÃO que contém o conteúdo da aba Manuscrito
 
-with tab_ai_review:
-    tab_ai_review()
+with _tab_ai_review: # Usando o novo nome da variável da aba
+    tab_ai_review() # Chamando a FUNÇÃO que contém o conteúdo da aba Revisão IA
 
-with tab_cover_brief:
-    tab_cover_brief()
+with _tab_cover_brief: # Usando o novo nome da variável da aba
+    tab_cover_brief() # Chamando a FUNÇÃO que contém o conteúdo da aba Brief Capa
 
-with tab_fastformat:
-    fastformat_tab_ui(st, st.session_state) # Passa st e st.session_state como argumentos
+with _tab_fastformat: # Este já estava correto, chamando fastformat_tab_ui
+    fastformat_tab_ui(st, st.session_state)
 
-with tab_export:
-    tab_export()
+with _tab_export: # Usando o novo nome da variável da aba
+    tab_export() # Chamando a FUNÇÃO que contém o conteúdo da aba Exportar
