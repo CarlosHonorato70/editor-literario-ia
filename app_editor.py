@@ -489,29 +489,56 @@ def tab_manuscript():
     st.subheader("Manuscrito")
     st.write("Carregue seu arquivo ou cole o texto para começar a editar.")
 
-    uploaded = st.file_uploader("Carregar arquivo (.txt ou .docx)", type=["txt", "docx"])
-    colu1, colu2, colu3 = st.columns([1, 1, 4])
-    with colu1:
-        if st.button("Ler arquivo", key="manuscript_read_file_btn"):
-            if uploaded:
-                st.session_state["texto_principal"] = load_text_from_file(uploaded)
-                st.success("Arquivo carregado e texto inserido no editor.")
-            else:
-                st.warning("Selecione um arquivo primeiro.")
+    # Placeholder para mensagens de feedback sobre o upload
+    upload_message_placeholder = st.empty()
 
-    with colu2:
-        if st.button("Limpar texto", key="manuscript_clear_text_btn"):
-            st.session_state["texto_principal"] = ""
-            st.info("Texto limpo.")
+    # O st.file_uploader agora processa o arquivo automaticamente
+    uploaded_file = st.file_uploader(
+        "Selecione seu arquivo (.txt ou .docx) aqui:",
+        type=["txt", "docx"],
+        key="file_uploader_main"
+    )
 
-    texto_atual = st.text_area(
-        "Editor de texto",
+    if uploaded_file is not None:
+        # A lógica para evitar reprocessar o mesmo arquivo repetidamente
+        current_file_id = uploaded_file.id
+        if st.session_state.get("last_processed_file_id") != current_file_id:
+            try:
+                file_content = load_text_from_file(uploaded_file)
+                st.session_state["texto_principal"] = file_content
+                st.session_state["last_processed_file_id"] = current_file_id
+                upload_message_placeholder.success("✅ Arquivo carregado com sucesso! O texto está no editor abaixo.")
+                # st.rerun() # Raramente necessário, mas pode ser útil em alguns cenários de layout complexo
+            except Exception as e:
+                upload_message_placeholder.error(f"❌ Erro ao ler o arquivo: {e}")
+                st.session_state["texto_principal"] = "" # Limpa o texto em caso de erro
+        else:
+            upload_message_placeholder.info("Arquivo já processado. Edite o texto ou carregue um novo.")
+    else:
+        # Limpa o ID do último arquivo processado se o uploader estiver vazio
+        if "last_processed_file_id" in st.session_state:
+            del st.session_state["last_processed_file_id"]
+        upload_message_placeholder.empty() # Remove a mensagem de status quando não há arquivo
+
+    # Botão para limpar o texto
+    if st.button("Limpar todo o texto do editor", key="manuscript_clear_text_btn"):
+        st.session_state["texto_principal"] = ""
+        if "last_processed_file_id" in st.session_state:
+            del st.session_state["last_processed_file_id"]
+        upload_message_placeholder.info("Editor de texto limpo.")
+        
+    # Área de texto principal
+    texto_atual_no_editor = st.text_area(
+        "Editor de texto (edite ou visualize o texto carregado)",
         value=st.session_state.get("texto_principal", ""),
         height=400,
         key="editor_textarea",
     )
-    if texto_atual != st.session_state.get("texto_principal", ""):
-        st.session_state["texto_principal"] = texto_atual
+    
+    # Se o usuário editar o texto diretamente na área, atualizamos o session_state
+    if texto_atual_no_editor != st.session_state.get("texto_principal", ""):
+        st.session_state["texto_principal"] = texto_atual_no_editor
+
 
 def tab_ai_review():
     st.subheader("Revisão por IA")
@@ -570,7 +597,7 @@ def tab_cover_brief():
     synopsis = st.text_area("Sinopse ou resumo (para o brief)", value=st.session_state.get("synopsis_brief", ""), height=150, key="cover_brief_synopsis")
 
     if st.button("Gerar Brief de Capa", key="cover_brief_generate_btn"):
-        with st.spinner("Gerando brief..."):
+        with st.spinner("Gerando..."):
             brief = cover_brief_by_ai(client, title, author, genre, synopsis)
             st.text_area("Brief de Capa Gerado", value=brief, height=400, key="cover_brief_result")
 
