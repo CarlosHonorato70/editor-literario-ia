@@ -39,7 +39,7 @@ def _to_curly_quotes(text: str, pt_br_style: bool = True) -> str:
     # Aspas simples (apostrofo vs aspas)
     text = re.sub(r"(\w)'(\w)", r"\1’\2", text) # Contração
     text = re.sub(r"(^|[\s(\[{<])(')(\s)", r"\1‘\3", text) # Abertura simples
-    text = text.sub(r"([^\s])(')", r"\1’", text) # Fechamento simples se não for abertura e não for contração
+    text = text.replace("'", "’") # Resto vira fechamento simples
 
     # Correção para apostrofo inicial em palavras (ex: 's algo)
     text = re.sub(r"(\s|^)'(\w)", r"\1‘\2", text)
