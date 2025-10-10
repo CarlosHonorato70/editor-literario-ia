@@ -1,539 +1,434 @@
 import os
+import io
+import re
+import difflib
+import base64
+from datetime import datetime
+
 import streamlit as st
-from openai import OpenAI
-from docx import Document
-from io import BytesIO
-from docx.shared import Inches, Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-import requests
-from docx.enum.style import WD_STYLE_TYPE
-import time
-from typing import Optional, Dict, Tuple, Any, List
-import math
-import json
-from fastformat import FastFormatOptions, apply_fastformat, make_unified_diff, default_options
 
-# --- CONFIGURAÇÃO DE CONSTANTES ---
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except Exception:
+    OPENAI_AVAILABLE = False
+    OpenAI = None  # type: ignore
 
-# 1. DICIONÁRIO DE TAMANHOS KDP/GRÁFICA (Miolo)
-KDP_SIZES: Dict[str, Dict] = {
-    "Padrão EUA (6x9 in)": {"name": "6 x 9 in", "width_in": 6.0, "height_in": 9.0, "width_cm": 15.24, "height_cm": 22.86, "papel_fator": 0.00115},
-    "Padrão A5 (5.83x8.27 in)": {"name": "A5 (14.8 x 21 cm)", "width_in": 5.83, "height_in": 8.27, "width_cm": 14.8, "height_cm": 21.0, "papel_fator": 0.00115},
-    "Pocket (5x8 in)": {"name": "5 x 8 in", "width_in": 5.0, "height_in": 8.0, "width_cm": 12.7, "height_cm": 20.32, "papel_fator": 0.00115},
-    "Maior (7x10 in)": {"name": "7 x 10 in", "width_in": 7.0, "height_in": 10.0, "width_cm": 17.78, "height_cm": 25.4, "papel_fator": 0.00115},
+try:
+    from docx import Document
+    DOCX_AVAILABLE = True
+except Exception:
+    DOCX_AVAILABLE = False
+    Document = None  # type: ignore
+
+
+# =========================
+# Configurações e Templates
+# =========================
+
+STYLE_TEMPLATES = {
+    "padrao_br": {
+        "label": "Padrão BR (neutro)",
+        "normalize_spaces": True,
+        "normalize_ellipses": True,
+        "typographic_dashes": True,
+        "quotes_style": "typographic",  # typographic | straight
+        "remove_double_blank_lines": True,
+    },
+    "abnt": {
+        "label": "ABNT (básico textual)",
+        "normalize_spaces": True,
+        "normalize_ellipses": True,
+        "typographic_dashes": True,
+        "quotes_style": "straight",
+        "remove_double_blank_lines": True,
+    },
+    "apa": {
+        "label": "APA (básico textual)",
+        "normalize_spaces": True,
+        "normalize_ellipses": True,
+        "typographic_dashes": True,
+        "quotes_style": "typographic",
+        "remove_double_blank_lines": True,
+    },
+    "jornalistico": {
+        "label": "Jornalístico (BR)",
+        "normalize_spaces": True,
+        "normalize_ellipses": True,
+        "typographic_dashes": True,
+        "quotes_style": "straight",
+        "remove_double_blank_lines": True,
+    },
 }
 
-# 2. TEMPLATES DE ESTILO DE DIAGRAMAÇÃO (Ficção e Acadêmico)
-STYLE_TEMPLATES: Dict[str, Dict] = {
-    "Romance Clássico (Garamond)": {"font_name": "Garamond", "font_size_pt": 11, "line_spacing": 1.15, "indent": 0.5},
-    "Thriller Moderno (Droid Serif)": {"font_name": "Droid Serif", "font_size_pt": 10, "line_spacing": 1.05, "indent": 0.3},
-    "Acadêmico/ABNT (Times New Roman 12)": {"font_name": "Times New Roman", "font_size_pt": 12, "line_spacing": 1.5, "indent": 0.0},
-}
 
-# 3. CONFIGURAÇÃO DA IA
-API_KEY_NAME = "OPENAI_API_KEY"
-PROJECT_ID_NAME = "OPENAI_PROJECT_ID"
-MODEL_NAME = "gpt-4o-mini"
+# =========================
+# Utilidades de IO
+# =========================
 
-# --- INICIALIZAÇÃO DA IA E LAYOUT ---
-st.set_page_config(page_title="Editora Literária IA", layout="wide")
-st.title("🚀 Editora Literária IA: Publicação Inteligente")
-st.subheader("Transforme seu manuscrito em um livro profissional, pronto para ABNT e KDP, com o poder da IA.")
-
-# Variáveis globais para rastrear o status da API
-client: Optional[OpenAI] = None
-API_KEY: Optional[str] = None
-PROJECT_ID: Optional[str] = None
-is_api_ready: bool = False  # Inicializa como False
-
-def initialize_openai_client():
-    """Inicializa o cliente OpenAI e verifica a disponibilidade da API."""
-    global client, API_KEY, PROJECT_ID, is_api_ready
+def read_text_file(uploaded_file) -> str:
+    content = uploaded_file.read()
     try:
-        if hasattr(st, 'secrets'):
-            API_KEY = st.secrets.get(API_KEY_NAME, os.environ.get(API_KEY_NAME))
-            PROJECT_ID = st.secrets.get(PROJECT_ID_NAME, os.environ.get(PROJECT_ID_NAME))
-        else:
-            API_KEY = os.environ.get(API_KEY_NAME)
-            PROJECT_ID = os.environ.get(PROJECT_ID_NAME)
-
-        if API_KEY and PROJECT_ID:
-            client = OpenAI(api_key=API_KEY, project=PROJECT_ID)
-            is_api_ready = True
-            st.sidebar.success("✅ Conexão OpenAI Pronta!")
-        else:
-            st.sidebar.error("❌ Conexão OpenAI Inativa.")
-            st.warning(f"Chave e ID do Projeto OpenAI não configurados. A revisão e a geração de capa NÃO funcionarão.")
-            is_api_ready = False
-
-    except Exception as e:
-        st.error(f"Erro na inicialização do ambiente (secrets/env). Detalhes: {e}")
-        client = None
-        is_api_ready = False
-
-initialize_openai_client()
-
-# --- FUNÇÕES DE AUXÍLIO ---
-
-def call_openai_api(system_prompt: str, user_content: str, max_tokens: int = 3000, retries: int = 5) -> str:
-    """
-    Função genérica para chamar a API da OpenAI com backoff exponencial.
-    O número de tentativas é 5 para resiliência contra instabilidade de rede ou da API.
-    """
-    global client, is_api_ready
-
-    if not is_api_ready or client is None:
-        return "[ERRO DE CONEXÃO DA API] Chaves OPENAI_API_KEY e/ou OPENAI_PROJECT_ID não configuradas."
-
-    for i in range(retries):
+        return content.decode("utf-8")
+    except UnicodeDecodeError:
         try:
-            response = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content}
-                ],
-                temperature=0.7,
-                max_tokens=max_tokens
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            error_msg = str(e)
+            return content.decode("latin-1")
+        except UnicodeDecodeError:
+            return content.decode("utf-8", errors="ignore")
 
-            if "Invalid API key" in error_msg or "Error code: 401" in error_msg:
-                st.error(f"ERRO DE AUTENTICAÇÃO: Sua chave de API está incorreta ou expirada.")
-                return "[ERRO DE CONEXÃO DA API] Chave de API Inválida."
 
-            elif i < retries - 1:
-                wait_time = 2 ** i  # Backoff exponencial
-                st.warning(f"Erro de API/Rede. Tentando novamente em {wait_time} segundos... (Tentativa {i+1}/{retries})")
-                time.sleep(wait_time)
-            else:
-                st.error(f"Falha ao se comunicar com a OpenAI após {retries} tentativas. Detalhes: {e}")
-                return f"[ERRO DE CONEXÃO DA API] Falha: {e}"
-
-    return "[ERRO DE CONEXÃO DA API] Tentativas de conexão esgotadas."
-
-def run_fast_process_with_timer(message: str, func: callable, *args: Any, **kwargs: Any) -> Tuple[Any, float]:
-    """Executa uma função, mede o tempo e exibe feedback ao usuário."""
-    start_time = time.time()
-
-    with st.spinner(f"⏳ {message}..."):
-        result = func(*args, **kwargs)
-
-    duration = round(time.time() - start_time, 1)
-
-    if isinstance(result, str) and "[ERRO DE CONEXÃO DA API]" in result:
-        st.error(f"❌ {message} falhou em {duration}s. Verifique o log de erros.")
-        return result, duration
-    else:
-        st.success(f"✅ {message} concluída em {duration}s.")
-        return result, duration
-
-# --- FUNÇÕES ESPECÍFICAS DA IA ---
-
-def revisar_paragrafo(paragrafo_texto: str, delay_s: float) -> str:
-    """Revisão de um único parágrafo, utilizando o delay ajustável."""
-    if not paragrafo_texto.strip():
+def read_docx_file(uploaded_file) -> str:
+    if not DOCX_AVAILABLE:
+        st.error("python-docx não está instalado. Instale com: pip install python-docx")
         return ""
-    system_prompt = "Você é um editor literário. Revise, edite e aprimore o parágrafo. Corrija gramática, aprimore o estilo e garanta a coerência. Retorne apenas o parágrafo revisado, sem comentários."
-    user_content = f"Parágrafo a ser editado: {paragrafo_texto}"
-    texto_revisado = call_openai_api(system_prompt, user_content, max_tokens=500)
+    # Carrega o arquivo em memória
+    data = uploaded_file.read()
+    bio = io.BytesIO(data)
+    doc = Document(bio)
+    paragraphs = [p.text for p in doc.paragraphs]
+    return "\n".join(paragraphs)
 
-    if "[ERRO DE CONEXÃO DA API]" in texto_revisado:
-        return paragrafo_texto
 
-    time.sleep(delay_s)
-    return texto_revisado
+def export_docx(text: str) -> bytes:
+    if not DOCX_AVAILABLE:
+        st.error("python-docx não está instalado. Instale com: pip install python-docx")
+        return b""
+    doc = Document()
+    for block in text.split("\n"):
+        # Parágrafos vazios também são representados
+        doc.add_paragraph(block)
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
 
-def gerar_conteudo_marketing(titulo: str, autor: str, texto_completo: str) -> str:
-    """Gera um blurb de contracapa envolvente para marketing."""
-    system_prompt = "Você é um Copywriter de Best-sellers. Sua tarefa é criar um blurb de contracapa envolvente (3-4 parágrafos). Gere o resultado APENAS com o texto do blurb, sem títulos."
-    user_content = f"Crie um blurb de 3-4 parágrafos para este livro: Título: {titulo}, Autor: {autor}. Amostra: {texto_completo[:5000]}"
-    return call_openai_api(system_prompt, user_content, max_tokens=1000)
 
-def gerar_relatorio_estrutural(texto_completo: str) -> str:
-    """Gera um relatório de revisão estrutural para o autor."""
-    system_prompt = "Você é um Editor-Chefe. Gere um breve Relatório de Revisão para o autor. Foque em: Ritmo da Narrativa, Desenvolvimento de Personagens e Estrutura Geral. Use títulos e bullet points."
-    user_content = f"MANUSCRITO PARA ANÁLISE (Amostra): {texto_completo[:15000]}"
-    return call_openai_api(system_prompt, user_content)
+# =========================
+# Normalizações e Formatação
+# =========================
 
-def gerar_elementos_pre_textuais(titulo: str, autor: str, ano: int, texto_completo: str) -> str:
-    """Gera conteúdo essencial de abertura e fechamento para um livro."""
-    system_prompt = '''
-    Você é um gerente de editora. Gere o conteúdo essencial de abertura e fechamento para um livro.
-    Gere o resultado no formato estrito:
-    ### 1. Página de Copyright e Créditos
-    [Texto de Copyright e Créditos (inclua ano 2025)]
-    ### 2. Página 'Sobre o Autor'
-    [Bio envolvente de 2-3 parágrafos, formatada para uma página de livro.]
-    '''
-    user_content = f'''
-    Título: {titulo}, Autor: {autor}, Ano: {ano}. Analise o tom do manuscrito (Amostra): {texto_completo[:5000]}
-    '''
-    return call_openai_api(system_prompt, user_content)
+def normalize_spaces(text: str) -> str:
+    # Remove espaços duplos, espaços antes de pontuação, trims de linha
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r" *([,;:.!?…])", r"\1", text)
+    text = re.sub(r"\s+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)  # compacta múltiplas linhas em no máx. 2
+    # Remove espaços no início/fim de cada linha
+    text = "\n".join([line.strip() for line in text.splitlines()])
+    return text
 
-def gerar_relatorio_conformidade_kdp(titulo: str, autor: str, page_count: int, format_data: Dict, espessura_cm: float, capa_largura_total_cm: float, capa_altura_total_cm: float) -> str:
-    """Gera um relatório de conformidade KDP para publicação de livros físicos e eBooks."""
-    tamanho_corte = format_data['name']
-    prompt_kdp = f'''
-    Você é um Especialista Técnico em Publicação e Conformidade da Amazon KDP. Gere um Relatório de Conformidade focado em upload bem-sucedido para Livros Físicos (Brochura) e eBooks.
 
-    Gere o relatório usando o formato de lista e títulos, focando em:
+def normalize_ellipses(text: str) -> str:
+    # Normaliza reticências: três pontos no formato …
+    text = re.sub(r"\.\.\.+", "…", text)
+    # Garante espaço antes/depois se necessário
+    text = re.sub(r"\s*…\s*", " … ", text)
+    # Compacta espaços
+    text = re.sub(r"\s{2,}", " ", text)
+    return text.strip()
 
-    ### 1. Livro Físico (Brochura - Especificações)
-    - Tamanho de Corte Final (Miolo): {tamanho_corte} ({format_data['width_cm']} x {format_data['height_cm']} cm).
-    - Espessura da Lombada (Calculada): {espessura_cm} cm.
-    - Dimensões do Arquivo de Capa (Arte Completa com Sangria): {capa_largura_total_cm} cm (Largura Total) x {capa_altura_total_cm} cm (Altura Total).
-    - Margens: Verifique se as margens internas do DOCX (lado da lombada) estão em 1.0 polegadas para segurança do corte.
 
-    ### 2. Checklist de Miolo (DOCX)
-    - Confirme que todos os títulos de capítulos estão marcados com o estilo 'Título 1' no DOCX baixado (essencial para Sumário/TOC automático).
-    - As quebras de página foram usadas corretamente entre os capítulos.
+def to_typographic_quotes(text: str) -> str:
+    # Converte aspas retas para tipográficas de forma simples/heurística.
+    # Nota: solução heurística; casos complexos podem não ficar perfeitos.
+    result = []
+    double_is_open = True
+    single_is_open = True
+    for ch in text:
+        if ch == '"':
+            result.append("“" if double_is_open else "”")
+            double_is_open = not double_is_open
+        elif ch == "'":
+            result.append("‘" if single_is_open else "’")
+            single_is_open = not single_is_open
+        else:
+            result.append(ch)
+    return "".join(result)
 
-    ### 3. Otimização de Metadados (SEO Básico KDP)
-    Sugira 3 categorias de nicho da Amazon e 3 palavras-chave de cauda longa para otimizar a listagem do livro '{titulo}' por '{autor}'.
-    '''
-    return call_openai_api("Você é um especialista em publicação KDP.", prompt_kdp)
 
-def gerar_capa_ia_completa(prompt_visual: str, blurb: str, autor: str, titulo: str, largura_cm: float, altura_cm: float, espessura_cm: float) -> str:
-    """Chama a API DALL-E 3 para gerar a imagem da capa COMPLETA."""
-    global client, is_api_ready
+def to_straight_quotes(text: str) -> str:
+    text = text.replace("“", '"').replace("”", '"')
+    text = text.replace("‘", "'").replace("’", "'")
+    return text
 
-    if not is_api_ready or client is None:
-        return "[ERRO GERAÇÃO DE CAPA] Chaves OPENAI_API_KEY e/ou OPENAI_PROJECT_ID não configuradas."
 
-    full_prompt = f'''
-    Crie uma imagem de CAPA COMPLETA E ÚNICA para impressão, com texto. As dimensões físicas totais (largura x altura) são: {largura_cm} cm x {altura_cm} cm. A lombada tem {espessura_cm} cm de espessura, localizada no centro.
+def typographic_dashes(text: str) -> str:
+    # Substitui -- por — (travessão), preservando espaços apropriados
+    text = re.sub(r"\s?--\s?", " — ", text)
+    # Normaliza espaços em torno do travessão
+    text = re.sub(r"\s*—\s*", " — ", text)
+    # Remove espaços duplicados
+    text = re.sub(r"\s{2,}", " ", text)
+    # Ajusta travessão no início de fala
+    text = re.sub(r"^\s*-\s+", "— ", text, flags=re.MULTILINE)
+    return text.strip()
 
-    O design deve seguir o estilo: "{prompt_visual}".
-    A arte DEVE incluir:
-    1. Título '{titulo}' e Autor '{autor}' na capa (Frente).
-    2. Título e Autor CLARAMENTE visíveis e centralizados na LOMBADA.
-    3. O Blurb de vendas (texto do verso) na CONTRACAPA. Texto: "{blurb[:500]}..." (Use o máximo do texto possível, estilizado).
-    4. Crie uma composição coesa que se estenda pela frente, lombada e verso. O design deve ser profissional e pronto para impressão.
-    '''
+
+def remove_double_blank_lines(text: str) -> str:
+    return re.sub(r"\n{3,}", "\n\n", text)
+
+
+def apply_local_formatting(text: str, opts: dict) -> str:
+    out = text
+
+    if opts.get("normalize_spaces"):
+        out = normalize_spaces(out)
+
+    if opts.get("normalize_ellipses"):
+        out = normalize_ellipses(out)
+
+    if opts.get("typographic_dashes"):
+        out = typographic_dashes(out)
+
+    quotes_style = opts.get("quotes_style", "typographic")
+    if quotes_style == "typographic":
+        out = to_typographic_quotes(out)
+    else:
+        out = to_straight_quotes(out)
+
+    if opts.get("remove_double_blank_lines"):
+        out = remove_double_blank_lines(out)
+
+    return out.strip()
+
+
+def apply_ai_refinement(text: str, opts: dict, tone_hint: str = "") -> str:
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not (OPENAI_AVAILABLE and api_key):
+        st.warning("OPENAI_API_KEY não configurada ou SDK indisponível. Pulando etapa de IA.")
+        return text
+
+    client = OpenAI(api_key=api_key)
+
+    # Monta um breve prompt de instruções
+    template_label = opts.get("template_label", "Padrão BR")
+    quotes = opts.get("quotes_style", "typographic")
+    dash_pref = "travessão" if opts.get("typographic_dashes") else "hífen"
+    ellipses_pref = "use reticências como …" if opts.get("normalize_ellipses") else "mantenha reticências como '...'"
+    quotes_pref = "aspas tipográficas" if quotes == "typographic" else "aspas retas"
+    tone = tone_hint or "mantenha o tom e o conteúdo original"
+
+    system_msg = (
+        "Você é um formatter de texto. Aplique APENAS formatação e microedição, "
+        "sem reescrever ou alterar conteúdo."
+    )
+    user_msg = f"""
+Regras:
+- Template: {template_label}
+- Aspas: {quotes_pref}
+- Dashes: {dash_pref}
+- Reticências: {ellipses_pref}
+- {tone}
+
+Instruções:
+- Não adicione nem remova ideias.
+- Não resuma.
+- Preserve quebras de linha.
+- Retorne somente o texto final formatado, sem explicações.
+
+Texto:
+{text}
+""".strip()
 
     try:
-        response = client.images.generate(
-            model="dall-e-3",
-            prompt=full_prompt,
-            size="1792x1024",
-            quality="hd",
-            n=1
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.1,
         )
-        image_url = response.data[0].url
-        return image_url
+        ai_text = completion.choices[0].message.content if completion.choices else ""
+        return ai_text.strip() if ai_text else text
     except Exception as e:
-        return f"[ERRO GERAÇÃO DE CAPA] Falha ao gerar a imagem: {e}. Verifique se sua conta OpenAI tem créditos para DALL-E 3."
+        st.error(f"Falha na etapa de IA: {e}")
+        return text
 
-# --- FUNÇÕES DOCX AVANÇADAS ---
 
-def adicionar_pagina_rosto(documento: Document, titulo: str, autor: str, style_data: Dict):
-    """Adiciona a página de rosto ao documento DOCX."""
-    font_name = style_data['font_name']
-    documento.add_page_break()
-    p_title = documento.add_paragraph()
-    p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p_title.add_run(titulo).bold = True
-    p_title.runs[0].font.size = Pt(24)
-    p_title.runs[0].font.name = font_name
-    for _ in range(5):
-        documento.add_paragraph()
-    p_author = documento.add_paragraph()
-    p_author.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p_author.add_run(autor)
-    p_author.runs[0].font.size = Pt(16)
-    p_author.runs[0].font.name = font_name
-    documento.add_page_break()
+# =========================
+# Diff e Exibição
+# =========================
 
-def adicionar_pagina_generica(documento: Document, titulo: str, subtitulo: Optional[str] = None):
-    """Adiciona uma página genérica com título e subtítulo ao documento DOCX."""
-    documento.add_page_break()
-    p_header = documento.add_paragraph()
-    p_header.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p_header.add_run(titulo).bold = True
-    p_header.runs[0].font.size = Pt(18)
-    if subtitulo:
-        p_sub = documento.add_paragraph()
-        p_sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p_sub.add_run(subtitulo).italic = True
-        p_sub.runs[0].font.size = Pt(12)
-    documento.add_paragraph("")
-    if titulo == "Sumário":
-        p_inst = documento.add_paragraph("⚠️ Para gerar o índice automático, use a função 'Referências' -> 'Sumário' do seu editor de texto. Todos os títulos de capítulo já foram marcados (Estilo: Título 1).")
-    else:
-        p_inst = documento.add_paragraph("⚠️ Este é um placeholder. Insira o conteúdo real aqui após o download. O espaço e a numeração já estão configurados.")
-    p_inst.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p_inst.runs[0].font.size = Pt(10)
-    documento.add_page_break()
+def render_html_diff(a: str, b: str) -> str:
+    # Gera uma tabela HTML com difflib.HtmlDiff
+    a_lines = a.splitlines()
+    b_lines = b.splitlines()
+    differ = difflib.HtmlDiff(wrapcolumn=80)
+    html = differ.make_table(
+        fromlines=a_lines,
+        tolines=b_lines,
+        fromdesc="Original",
+        todesc="Formatado",
+        context=True,
+        numlines=2,
+    )
+    style = """
+    <style>
+      table.diff { font-family: monospace; border: 1px solid #ddd; border-collapse: collapse; width: 100%; }
+      .diff_header { background: #f6f8fa; }
+      td, th { padding: 4px 6px; border: 1px solid #eee; vertical-align: top; }
+      .diff_add { background: #e6ffed; }
+      .diff_chg { background: #fff5b1; }
+      .diff_sub { background: #ffeef0; }
+    </style>
+    """
+    return style + html
 
-# --- FUNÇÃO PRINCIPAL DE DIAGRAMAÇÃO E REVISÃO (Com Checkpointing) ---
 
-def processar_manuscrito(uploaded_file, format_data: Dict, style_data: Dict, incluir_indices_abnt: bool, status_container, time_rate_s: float):
-    """Processa o manuscrito, aplicando diagramação, revisão e checkpointing."""
-    global is_api_ready
-    status_container.empty()
+# =========================
+# UI - Streamlit
+# =========================
 
-    documento_original = Document(uploaded_file)
-    documento_revisado = Document()
+st.set_page_config(page_title="FastFormat — Editor Literário IA", layout="wide")
 
-    # 1. Configuração de Layout e Estilo
-    section = documento_revisado.sections[0]
-    section.page_width = Inches(format_data['width_in'])
-    section.page_height = Inches(format_data['height_in'])
-    section.left_margin = Inches(1.0)
-    section.right_margin = Inches(0.6)
-    section.top_margin = Inches(0.8)
-    section.bottom_margin = Inches(0.8)
+st.title("FastFormat — Editor Literário IA")
+st.caption("Pré-visualize, compare, aplique e exporte formatações de texto de forma rápida.")
 
-    font_name = style_data['font_name']
-    font_size_pt = style_data['font_size_pt']
-    line_spacing = style_data['line_spacing']
-    indent_in = style_data['indent']
+with st.sidebar:
+    st.header("Configuração Inicial")
 
-    style = documento_revisado.styles['Normal']
-    style.font.name = font_name
-    style.font.size = Pt(font_size_pt)
-    paragraph_format = style.paragraph_format
-    paragraph_format.line_spacing = line_spacing
-    paragraph_format.first_line_indent = Inches(indent_in)
+    # Template de Estilo (corrigido, string fechada)
+    template_keys = list(STYLE_TEMPLATES.keys())
+    template_labels = [STYLE_TEMPLATES[k]["label"] for k in template_keys]
+    default_index = 0
 
-    # --- 2. Geração dos Elementos Pré-textuais (Fase 1) ---
-    uploaded_file.seek(0)
-    manuscript_sample = uploaded_file.getvalue().decode('utf-8', errors='ignore')[:5000]
+    style_key = st.selectbox(
+        "Template de Estilo",
+        options=template_keys,
+        index=default_index,
+        format_func=lambda k: STYLE_TEMPLATES[k]["label"],
+        help="Escolha um template de formatação base.",
+    )
 
-    with status_container:
-        st.subheader("Fase 1/3: Geração de Elementos Pré-textuais")
+    base_opts = STYLE_TEMPLATES[style_key].copy()
+    base_opts["template_label"] = base_opts.get("label", "Padrão BR")
 
-    if is_api_ready:
-        pre_text_content, duration = run_fast_process_with_timer(
-            "Geração de Copyright e Bio do Autor (IA)",
-            gerar_elementos_pre_textuais,
-            st.session_state['book_title'],
-            st.session_state['book_author'],
-            2025,
-            manuscript_sample
+    st.subheader("Ajustes finos")
+
+    # Estilo de aspas (corrigido: atribuição, format_func e aspas internas)
+    quotes_style = st.radio(
+        "Estilo de aspas",
+        options=["typographic", "straight"],
+        index=0 if base_opts.get("quotes_style") == "typographic" else 1,
+        format_func=lambda x: 'Tipográficas ("","")' if x == "typographic" else 'Retas ("","")',
+        help='Tipográficas: “ ” e ‘ ’. Retas: " e \'.',
+    )
+
+    normalize_spaces_opt = st.checkbox(
+        "Normalizar espaços e espaçamentos de pontuação",
+        value=bool(base_opts.get("normalize_spaces", True)),
+    )
+    normalize_ellipses_opt = st.checkbox(
+        "Normalizar reticências (…)",
+        value=bool(base_opts.get("normalize_ellipses", True)),
+    )
+    dashes_opt = st.checkbox(
+        "Usar travessões tipográficos (—) e padronizar diálogos",
+        value=bool(base_opts.get("typographic_dashes", True)),
+    )
+    remove_blank_lines_opt = st.checkbox(
+        "Compactar múltiplas linhas vazias",
+        value=bool(base_opts.get("remove_double_blank_lines", True)),
+    )
+
+    use_ai = st.checkbox(
+        "Usar IA para refinar o estilo sem alterar o conteúdo",
+        value=False,
+        help="Requer OPENAI_API_KEY configurada no ambiente.",
+    )
+    tone_hint = ""
+    if use_ai:
+        tone_hint = st.text_input(
+            "Dica de tom (opcional)",
+            placeholder="Ex.: manter tom literário, fluidez sutil, sem alterar conteúdo"
         )
+
+    st.markdown("---")
+    st.caption("Dica: Você pode colar um texto abaixo ou enviar um arquivo .txt / .docx no corpo do app.")
+
+# Entrada de texto/arquivo
+st.subheader("Entrada")
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    text_input = st.text_area(
+        "Cole seu texto aqui",
+        height=260,
+        placeholder="Cole seu texto ou use o upload ao lado...",
+    )
+
+with col2:
+    uploaded = st.file_uploader("Ou envie um arquivo", type=["txt", "docx"])
+    if uploaded is not None:
+        if uploaded.name.lower().endswith(".txt"):
+            text_input = read_text_file(uploaded)
+        elif uploaded.name.lower().endswith(".docx"):
+            text_input = read_docx_file(uploaded)
+
+if not text_input:
+    st.info("Insira texto na caixa acima ou envie um arquivo para começar.")
+    st.stop()
+
+# Prepara opções consolidadas
+opts = {
+    "template_label": base_opts.get("template_label", "Padrão BR"),
+    "quotes_style": quotes_style,
+    "normalize_spaces": normalize_spaces_opt,
+    "normalize_ellipses": normalize_ellipses_opt,
+    "typographic_dashes": dashes_opt,
+    "remove_double_blank_lines": remove_blank_lines_opt,
+}
+
+# Pré-visualização (local, sem IA)
+preview_text = apply_local_formatting(text_input, opts)
+
+st.subheader("Pré-visualização formatada (sem IA)")
+st.text_area("Preview", value=preview_text, height=240)
+
+# Diff
+with st.expander("Ver Diff (Original vs. Formatado)", expanded=False):
+    html = render_html_diff(text_input, preview_text)
+    st.components.v1.html(html, height=360, scrolling=True)
+
+# Aplicar e Exportar
+st.markdown("---")
+st.subheader("Aplicar formatação")
+
+apply_btn = st.button("Aplicar agora", type="primary")
+final_text = preview_text
+
+if apply_btn:
+    # Opcional: camadas — local + IA
+    if use_ai:
+        final_text = apply_ai_refinement(preview_text, opts, tone_hint=tone_hint or "")
     else:
-        pre_text_content = "### 1. Página de Copyright e Créditos\n[Placeholder de Copyright]\n### 2. Página 'Sobre o Autor'\n[Placeholder de Bio]"
-        with status_container:
-            st.warning("⚠️ Elementos Pré-textuais pulados: Conexão OpenAI inativa.")
+        final_text = preview_text
 
-    # Inserção de Páginas de Abertura
-    adicionar_pagina_rosto(documento_revisado, st.session_state['book_title'], st.session_state['book_author'], style_data)
+    st.success("Formatação aplicada!")
+    st.text_area("Resultado final", value=final_text, height=260)
 
-    try:
-        copyright_text_full = pre_text_content.split('### 1. Página de Copyright e Créditos')[1].split('### 2. Página \'Sobre o Autor\'')[0].strip()
-    except IndexError:
-        copyright_text_full = "[Erro ao extrair Copyright. Verifique a conexão da API.]"
+    # Downloads
+    colA, colB = st.columns(2)
 
-    adicionar_pagina_generica(documento_revisado, "Página de Créditos", "Informações de Copyright e ISBN")
-    for line in copyright_text_full.split('\n'):
-        if line.strip():
-            documento_revisado.add_paragraph(line.strip(), style='Normal')
+    with colA:
+        # Download TXT
+        b64 = base64.b64encode(final_text.encode("utf-8")).decode("utf-8")
+        filename_txt = f"texto_formatado_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        href = f'<a href="data:text/plain;base64,{b64}" download="{filename_txt}">⬇️ Baixar .txt</a>'
+        st.markdown(href, unsafe_allow_html=True)
 
-    adicionar_pagina_generica(documento_revisado, "Sumário")
-
-    # --- 3. Processamento do Miolo (Fase 2 - Revisão Parágrafo a Parágrafo com Checkpointing) ---
-
-    paragrafos = documento_original.paragraphs
-    paragrafos_para_revisar = [p for p in paragrafos if len(p.text.strip()) >= 10]
-
-    total_paragrafos = len(paragrafos)
-    total_a_revisar = len(paragrafos_para_revisar)
-
-    texto_completo = ""
-    revisados_count = 0
-
-    processed_state_map = st.session_state['processed_state']
-
-    with status_container:
-        st.subheader("Fase 2/3: Revisão do Miolo (Parágrafo a Parágrafo)")
-        progress_bar = st.progress(0, text="Iniciando revisão...")
-        auto_checkpoint_placeholder = st.empty()
-
-    start_loop_time = time.time()
-    newly_reviewed_count = 0
-    current_revisados_total = 0
-
-    for i, paragrafo in enumerate(paragrafos):
-        original_text = paragrafo.text.strip()
-
-        if len(original_text) >= 10:
-            current_revisados_total += 1
-
-            if original_text in processed_state_map:
-                revisado_text = processed_state_map[original_text]
-                with auto_checkpoint_placeholder:
-                    st.info(f"✅ Carregado do checkpoint: "...{original_text[:50]}..."")
-            elif is_api_ready:
-                revisado_text = revisar_paragrafo(original_text, time_rate_s)
-                processed_state_map[original_text] = revisado_text
-                newly_reviewed_count += 1
-                with auto_checkpoint_placeholder:
-                    st.success(f"✨ Revisado pela IA: "...{original_text[:50]}..."")
-            else:
-                revisado_text = original_text
-                with auto_checkpoint_placeholder:
-                    st.warning(f"⚠️ IA inativa, usando original: "...{original_text[:50]}..."")
-        else:
-            revisado_text = original_text
-
-        if paragrafo.style.name.startswith('Heading'):
-            documento_revisado.add_paragraph(revisado_text, style=paragrafo.style.name)
-        else:
-            new_paragraph = documento_revisado.add_paragraph(revisado_text, style='Normal')
-            if 'Título 1' in paragrafo.style.name or 'Heading 1' in paragrafo.style.name:
-                new_paragraph.style = 'Heading 1'
-
-        texto_completo += revisado_text + "\n\n"
-
-        if total_a_revisar > 0:
-            percent_complete = int((current_revisados_total / total_a_revisar) * 100)
-            elapsed_time = time.time() - start_loop_time
-
-            if newly_reviewed_count > 0:
-                avg_time_per_newly_reviewed = elapsed_time / newly_reviewed_count
-                remaining_time_s = (total_a_revisar - current_revisados_total) * avg_time_per_newly_reviewed
-                remaining_minutes = int(remaining_time_s // 60)
-                remaining_seconds = int(remaining_time_s % 60)
-                remaining_time_str = f"{remaining_minutes}m {remaining_seconds}s"
-            else:
-                remaining_time_str = "Calculando..."
-
-            progress_bar.progress(
-                percent_complete / 100.0,
-                text=f"{percent_complete}% Concluído. {current_revisados_total}/{total_a_revisar} parágrafos revisados. Tempo restante estimado: {remaining_time_str}"
+    with colB:
+        # Download DOCX
+        if DOCX_AVAILABLE:
+            docx_bytes = export_docx(final_text)
+            filename_docx = f"texto_formatado_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+            st.download_button(
+                "⬇️ Baixar .docx",
+                data=docx_bytes,
+                file_name=filename_docx,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             )
-
-    end_loop_time = time.time()
-    total_loop_duration = round(end_loop_time - start_loop_time, 1)
-
-    with status_container:
-        progress_bar.empty()
-        st.success(f"Fase 2/3 concluída: Miolo processado em {total_loop_duration}s! 🎉 Total de parágrafos revisados pela IA nesta rodada: {newly_reviewed_count}.")
-
-    auto_checkpoint_placeholder.empty()
-
-    # --- 4. Inserção da Página Pós-Textual ---
-    documento_revisado.add_page_break()
-    try:
-        about_author_text_full = pre_text_content.split('### 2. Página \'Sobre o Autor\'')[1].strip()
-        about_author_text_full = about_author_text_full.replace("### 2. Página 'Sobre o Autor'", "").strip()
-    except IndexError:
-        about_author_text_full = "[Erro ao extrair a bio do Autor. Verifique a conexão da API.]"
-
-    adicionar_pagina_generica(documento_revisado, "Sobre o Autor", "Sua biografia gerada pela IA")
-    for line in about_author_text_full.split('\n'):
-        if line.strip():
-            documento_revisado.add_paragraph(line.strip(), style='Normal')
-
-    if incluir_indices_abnt:
-        adicionar_pagina_generica(documento_revisado, "Apêndice A", "Título do Apêndice")
-        adicionar_pagina_generica(documento_revisado, "Anexo I", "Título do Anexo")
-
-    # --- 5. Geração do Blurb de Marketing (Fase 3) ---
-    with status_container:
-        st.subheader("Fase 3/3: Geração de Elementos de Marketing")
-
-    if is_api_ready:
-        blurb_gerado, duration = run_fast_process_with_timer(
-            "Geração do Blurb de Marketing (Contracapa)",
-            gerar_conteudo_marketing,
-            st.session_state['book_title'],
-            st.session_state['book_author'],
-            texto_completo
-        )
-    else:
-        blurb_gerado = "[Blurb não gerado. Conecte a API para um texto de vendas profissional.]"
-        with status_container:
-            st.warning("⚠️ Blurb de Marketing pulado: Conexão OpenAI inativa.")
-
-    return documento_revisado, texto_completo, blurb_gerado
-
-# --- INICIALIZAÇÃO DE ESTADO (Com processed_state) ---
-if 'book_title' not in st.session_state:
-    st.session_state['book_title'] = "O Último Código de Honra"
-    st.session_state['book_author'] = "Carlos Honorato"
-    st.session_state['page_count'] = 250
-    st.session_state['capa_prompt'] = "Um portal antigo se abrindo no meio de uma floresta escura, estilo fantasia épica e mistério, cores roxo e preto, alta resolução."
-    st.session_state['blurb'] = "A IA gerará o Blurb (Contracapa) aqui. Edite antes de gerar a capa completa!"
-    st.session_state['generated_image_url'] = None
-    st.session_state['texto_completo'] = ""
-    st.session_state['documento_revisado'] = None
-    st.session_state['relatorio_kdp'] = ""
-    st.session_state['relatorio_estrutural'] = ""
-    st.session_state['format_option'] = "Padrão A5 (5.83x8.27 in)"
-    st.session_state['incluir_indices_abnt'] = False
-    if 'style_option' not in st.session_state:
-        st.session_state['style_option'] = "Romance Clássico (Garamond)"
-    if 'time_rate_s' not in st.session_state:
-        st.session_state['time_rate_s'] = 0.2
-    st.session_state['processed_state'] = {}
-    st.session_state["texto_principal"] = ""
-
-# --- CÁLCULOS DINÂMICOS ---
-format_option_default = "Padrão A5 (5.83x8.27 in)"
-selected_format_data_calc = KDP_SIZES.get(st.session_state.get('format_option', format_option_default), KDP_SIZES[format_option_default])
-
-espessura_cm = round(st.session_state['page_count'] * selected_format_data_calc['papel_fator'], 2)
-capa_largura_total_cm = round((selected_format_data_calc['width_cm'] * 2) + espessura_cm + 0.6, 2)
-capa_altura_total_cm = round(selected_format_data_calc['height_cm'] + 0.6, 2)
-
-# --- FUNÇÃO PARA CARREGAR CHECKPOINT ---
-def load_checkpoint_from_json(uploaded_json):
-    """Lê o arquivo JSON e carrega o estado de volta para a sessão."""
-    try:
-        bytes_data = uploaded_json.read()
-        data = json.loads(bytes_data.decode('utf-8'))
-
-        if isinstance(data, dict):
-            st.session_state['processed_state'] = data
-            st.success(f"Checkpoint carregado com sucesso! {len(data)} parágrafos revisados restaurados.")
         else:
-            st.error("Formato JSON inválido. O arquivo deve conter um objeto (dicionário).")
-    except Exception as e:
-        st.error(f"Erro ao ler/processar o arquivo JSON de checkpoint: {e}")
-
-# --- FLUXO PRINCIPAL DO APLICATIVO (Tabs) ---
-
-config_tab, miolo_tab, capa_tab, export_tab, revisao_tab, referencias_tab, colaboracao_tab, stem_tab, slides_tab = st.tabs([
-    "1. Configuração Inicial",
-    "2. Diagramação & Elementos",
-    "3. Capa Completa IA",
-    "4. Análise & Exportar",
-    "5. Revisão de Estilo e Gramática",
-    "6. Gerenciador de Referências",
-    "7. Revisão Colaborativa",
-    "8. Ferramentas STEM/Gêneros",
-    "9. Geração de Slides"
-])
-
-# --- TAB 1: CONFIGURAÇÃO INICIAL ---
-with config_tab:
-    st.header("Dados Essenciais para o Projeto")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.session_state['book_title'] = st.text_input("Título do Livro", st.session_state['book_title'])
-        st.session_state['page_count'] = st.number_input("Contagem Aproximada de Páginas (Miolo)", min_value=10, value=st.session_state['page_count'], step=10)
-    with col2:
-        st.session_state['book_author'] = st.text_input("Nome do Autor", st.session_state['book_author'])
-
-    st.header("Escolha de Formato e Estilo")
-
-    col3, col4, col5 = st.columns(3)
-    with col3:
-        st.session_state['format_option'] = st.selectbox(
-            "Tamanho de Corte Final (KDP/Gráfica):",
-            options=list(KDP_SIZES.keys()),
-            index=list(KDP_SIZES.keys()).index(st.session_state['format_option']),
-        )
-        selected_format_data = KDP_SIZES[st.session_state['format_option']]
-
-    with col4:
-        default_style_key = "Romance Clássico (Garamond)"
-        current_style_key = st.session_state.get('style_option', default_style_key)
-        style_option = st.selectbox(
-            "Template de Est
+            st.info("Instale python-docx para exportar .docx: pip install python-docx")
+else:
+    st.caption("Clique em “Aplicar agora” para confirmar e gerar os arquivos de download.")
