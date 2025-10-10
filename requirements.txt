@@ -20,7 +20,7 @@ reportlab>=4.0.0  # Alternativa para PDF
 
 # Análise de Texto
 textstat>=0.7.3  # Métricas de legibilidade
-smartypants>=0.1   # <-- ADICIONADO AQUI: Para tipografia inteligente (aspas curvas, etc.)
+smartypants>=0.1   # <-- A ÚNICA ADIÇÃO NECESSÁRIA AO SEU ARQUIVO ORIGINAL
 
 # Utilidades
 tqdm>=4.65.0  # Barras de progresso
