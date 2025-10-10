@@ -26,6 +26,7 @@ import requests
 import streamlit as st
 from io import BytesIO
 from typing import Optional, Dict, Any, Tuple, List
+import hashlib # <--- NOVA IMPORTAÇÃO AQUI!
 
 # IA
 try:
@@ -489,10 +490,8 @@ def tab_manuscript():
     st.subheader("Manuscrito")
     st.write("Carregue seu arquivo ou cole o texto para começar a editar.")
 
-    # Placeholder para mensagens de feedback sobre o upload
     upload_message_placeholder = st.empty()
 
-    # O st.file_uploader agora processa o arquivo automaticamente
     uploaded_file = st.file_uploader(
         "Selecione seu arquivo (.txt ou .docx) aqui:",
         type=["txt", "docx"],
@@ -500,33 +499,45 @@ def tab_manuscript():
     )
 
     if uploaded_file is not None:
-        # A lógica para evitar reprocessar o mesmo arquivo repetidamente
-        current_file_id = uploaded_file.id
-        if st.session_state.get("last_processed_file_id") != current_file_id:
-            try:
+        try:
+            # IMPORTANT: sempre seek(0) antes de ler para garantir que o cursor está no início
+            # getvalue() consome o stream, então resetamos antes de passar para load_text_from_file
+            uploaded_file.seek(0) 
+            file_content_bytes = uploaded_file.getvalue()
+            current_file_hash = hashlib.md5(file_content_bytes).hexdigest()
+
+            # Verifica se este arquivo (pelo seu hash de conteúdo) já foi processado nesta sessão
+            if st.session_state.get("last_processed_file_hash") != current_file_hash:
+                # Processa o arquivo
+                uploaded_file.seek(0) # Reset stream position again before loading content
                 file_content = load_text_from_file(uploaded_file)
                 st.session_state["texto_principal"] = file_content
-                st.session_state["last_processed_file_id"] = current_file_id
+                st.session_state["last_processed_file_hash"] = current_file_hash # Armazena o hash após o sucesso
                 upload_message_placeholder.success("✅ Arquivo carregado com sucesso! O texto está no editor abaixo.")
-                # st.rerun() # Raramente necessário, mas pode ser útil em alguns cenários de layout complexo
-            except Exception as e:
-                upload_message_placeholder.error(f"❌ Erro ao ler o arquivo: {e}")
-                st.session_state["texto_principal"] = "" # Limpa o texto em caso de erro
-        else:
-            upload_message_placeholder.info("Arquivo já processado. Edite o texto ou carregue um novo.")
-    else:
-        # Limpa o ID do último arquivo processado se o uploader estiver vazio
-        if "last_processed_file_id" in st.session_state:
-            del st.session_state["last_processed_file_id"]
-        upload_message_placeholder.empty() # Remove a mensagem de status quando não há arquivo
+            else:
+                upload_message_placeholder.info("Arquivo já processado. Edite o texto ou carregue um novo.")
+
+        except Exception as e:
+            upload_message_placeholder.error(f"❌ Erro ao ler o arquivo: {e}")
+            st.session_state["texto_principal"] = "" # Limpa o texto em caso de erro
+            # Também limpa o hash na session state para que uma nova tentativa de upload possa ser feita
+            if "last_processed_file_hash" in st.session_state:
+                del st.session_state["last_processed_file_hash"]
+    else: # uploaded_file is None, significando que nenhum arquivo está no uploader ou foi limpo
+        # Limpa as informações de rastreamento quando o uploader está vazio
+        if "last_processed_file_hash" in st.session_state:
+            del st.session_state["last_processed_file_hash"]
+        upload_message_placeholder.empty() # Remove a mensagem de status quando nenhum arquivo está presente
 
     # Botão para limpar o texto
     if st.button("Limpar todo o texto do editor", key="manuscript_clear_text_btn"):
         st.session_state["texto_principal"] = ""
-        if "last_processed_file_id" in st.session_state:
-            del st.session_state["last_processed_file_id"]
+        # Limpa qualquer hash/id de arquivo armazenado para garantir que o próximo upload seja tratado como novo
+        if "last_processed_file_hash" in st.session_state:
+            del st.session_state["last_processed_file_hash"]
         upload_message_placeholder.info("Editor de texto limpo.")
-        
+        # st.rerun() # Pode ser útil para resetar o widget do uploader visualmente, mas pode causar recargas indesejadas.
+
     # Área de texto principal
     texto_atual_no_editor = st.text_area(
         "Editor de texto (edite ou visualize o texto carregado)",
@@ -597,7 +608,7 @@ def tab_cover_brief():
     synopsis = st.text_area("Sinopse ou resumo (para o brief)", value=st.session_state.get("synopsis_brief", ""), height=150, key="cover_brief_synopsis")
 
     if st.button("Gerar Brief de Capa", key="cover_brief_generate_btn"):
-        with st.spinner("Gerando..."):
+        with st.spinner("Gerando brief..."):
             brief = cover_brief_by_ai(client, title, author, genre, synopsis)
             st.text_area("Brief de Capa Gerado", value=brief, height=400, key="cover_brief_result")
 
