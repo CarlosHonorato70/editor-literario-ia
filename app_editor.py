@@ -52,27 +52,67 @@ def revisar_gramatica_estilo(texto: str, ferramenta):
     if not ferramenta: return []
     return ferramenta.check(texto)
 
-# Ponto 3 & 6: Análise de Estilo e Consistência (via IA)
+# Ponto 3 & 6: Análise de Estilo e Consistência (via IA) - VERSÃO CORRIGIDA
 def gerar_sugestoes_estilo_ia(texto: str, client: OpenAI):
-    prompt = f"""Analise o trecho de texto como um editor literário. Forneça 3 a 5 sugestões para melhorar clareza, concisão e impacto. Identifique também possíveis inconsistências simples (ex: "Maria" vs "Marta"). Apresente cada sugestão em um novo parágrafo, começando com 'Sugestão:'"""
-    try:
-        response = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "user", "content": f"{prompt}\n\nTexto: ---{texto[:15000]}"}], temperature=0.5)
-        return response.choices[0].message.content.split('Sugestão:')[1:]
-    except Exception as e:
-        return [f"Erro na chamada à IA: {e}"]
+    prompt = f"""
+    Analise o seguinte trecho de texto como um editor literário sênior.
+    Forneça 3 a 5 sugestões concisas para melhorar o estilo, clareza, concisão ou impacto.
+    Identifique também possíveis inconsistências simples (ex: "Maria" vs "Marta").
+    Apresente cada sugestão em um novo parágrafo, começando com 'Sugestão:'.
 
-# Ponto 7: Geração de Metadados
-def gerar_metadados_ia(texto: str, client: OpenAI):
-    prompt = f"""Com base no manuscrito, gere: 1. Título Sugerido: [Um título criativo] 2. Palavras-chave: [5 a 7 palavras-chave separadas por vírgula] 3. Sinopse (150 palavras): [Uma sinopse para a contracapa]"""
+    Texto:
+    ---
+    {texto[:15000]}
+    """
     try:
-        response = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "user", "content": f"{prompt}\n\nManuscrito: ---{texto[:15000]}"}], temperature=0.7)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.5,
+        )
+        # Resposta mais robusta: divide a resposta e remove o primeiro item vazio
+        sugestoes = response.choices[0].message.content.split('Sugestão:')
+        # Filtra strings vazias e remove espaços em branco extras
+        return [s.strip() for s in sugestoes if s.strip()]
+    except Exception as e:
+        st.error(f"Ocorreu um erro ao chamar a IA para análise de estilo: {e}")
+        return ["Não foi possível gerar as sugestões de estilo. Verifique sua chave de API e a conexão."]
+
+
+# Ponto 7: Geração de Metadados - VERSÃO CORRIGIDA
+def gerar_metadados_ia(texto: str, client: OpenAI):
+    prompt = f"""
+    Com base no manuscrito a seguir, gere os seguintes metadados para um livro:
+    1. Título Sugerido: [Um título criativo e relevante]
+    2. Palavras-chave: [Uma lista de 5 a 7 palavras-chave separadas por vírgula]
+    3. Sinopse (150 palavras): [Uma sinopse envolvente para a contracapa]
+
+    Manuscrito:
+    ---
+    {texto[:15000]}
+    """
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+        )
         content = response.choices[0].message.content
-        titulo = re.search(r"Título Sugerido: (.*?)\n", content, re.IGNORECASE).group(1)
-        palavras_chave = re.search(r"Palavras-chave: (.*?)\n", content, re.IGNORECASE).group(1)
-        sinopse = re.search(r"Sinopse(?: \(150 palavras\))?: (.*)", content, re.DOTALL | re.IGNORECASE).group(1)
+
+        # Abordagem defensiva: use um valor padrão 'Não encontrado' se o padrão falhar
+        titulo_match = re.search(r"Título Sugerido: (.*?)\n", content, re.IGNORECASE)
+        titulo = titulo_match.group(1).strip() if titulo_match else "Não foi possível extrair o título."
+
+        palavras_chave_match = re.search(r"Palavras-chave: (.*?)\n", content, re.IGNORECASE)
+        palavras_chave = palavras_chave_match.group(1).strip() if palavras_chave_match else "Não foi possível extrair as palavras-chave."
+
+        sinopse_match = re.search(r"Sinopse(?: \(150 palavras\))?: (.*)", content, re.DOTALL | re.IGNORECASE)
+        sinopse = sinopse_match.group(1).strip() if sinopse_match else "Não foi possível extrair a sinopse. Resposta completa da IA: " + content
+
         return {"titulo": titulo, "palavras_chave": palavras_chave, "sinopse": sinopse}
     except Exception as e:
-        return {"titulo": "Erro", "palavras_chave": "Erro", "sinopse": f"Falha ao gerar metadados: {e}"}
+        st.error(f"Ocorreu um erro ao chamar a IA para geração de metadados: {e}")
+        return {"titulo": "Erro", "palavras_chave": "Erro", "sinopse": f"Falha ao se comunicar com a API. Verifique sua chave e a conexão."}
 
 # Ponto 4, 5 e 8: Formatação e Exportação para .DOCX
 def gerar_manuscrito_final_docx(titulo: str, autor: str, texto_manuscrito: str):
@@ -233,7 +273,7 @@ with tab2:
             if st.session_state.metadados_gerados:
                 with st.expander("Metadados Gerados pela IA", expanded=False):
                     st.text_input("Título Sugerido", value=st.session_state.metadados_gerados['titulo'])
-                    st.text_input("Palavras-chave Sugeridas", value=st.session_state.metadados_gerados['palavras_chave'])
+                    st.text_input("Palavras-chave Sugeridas", value=.session_state.metadados_gerados['palavras_chave'])
                     st.text_area("Sinopse Sugerida", value=st.session_state.metadados_gerados['sinopse'], height=200)
 
 with tab3:
