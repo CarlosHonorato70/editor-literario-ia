@@ -42,9 +42,9 @@ def carregar_ferramenta_gramatical():
 def limpar_e_otimizar_tipografia(texto: str) -> str:
     """Aplica aspas curvas, travessões e outras melhorias tipográficas."""
     texto = smartypants.smartypants(texto, 2)
-    texto = re.sub(r'^\s*-\s+', '— ', texto, flags=re.MULTILINE)
+    texto = re.sub(r'^\\s*-\\s+', '— ', texto, flags=re.MULTILINE)
     texto = re.sub(r' +', ' ', texto)
-    texto = re.sub(r'\n{3,}', '\n\n', texto)
+    texto = re.sub(r'\\n{3,}', '\\n\\n', texto)
     return texto.strip()
 
 def revisar_gramatica_estilo(texto: str, ferramenta):
@@ -92,11 +92,11 @@ def gerar_metadados_ia(texto: str, client: OpenAI):
             temperature=0.7,
         )
         content = response.choices[0].message.content
-        titulo_match = re.search(r"Título Sugerido: (.*?)\n", content, re.IGNORECASE)
+        titulo_match = re.search(r"Título Sugerido: (.*?)\\n", content, re.IGNORECASE)
         titulo = titulo_match.group(1).strip() if titulo_match else "Não foi possível extrair o título."
-        palavras_chave_match = re.search(r"Palavras-chave: (.*?)\n", content, re.IGNORECASE)
+        palavras_chave_match = re.search(r"Palavras-chave: (.*?)\\n", content, re.IGNORECASE)
         palavras_chave = palavras_chave_match.group(1).strip() if palavras_chave_match else "Não foi possível extrair as palavras-chave."
-        sinopse_match = re.search(r"Sinopse(?: \(150 palavras\))?: (.*)", content, re.DOTALL | re.IGNORECASE)
+        sinopse_match = re.search(r"Sinopse(?: \\(150 palavras\\))?: (.*)", content, re.DOTALL | re.IGNORECASE)
         sinopse = sinopse_match.group(1).strip() if sinopse_match else "Não foi possível extrair a sinopse. Resposta completa da IA: " + content
         return {"titulo": titulo, "palavras_chave": palavras_chave, "sinopse": sinopse}
     except Exception as e:
@@ -110,7 +110,7 @@ def gerar_manuscrito_final_docx(titulo: str, autor: str, texto_manuscrito: str):
         section.top_margin = section.bottom_margin = section.left_margin = section.right_margin = Inches(1)
     document.add_paragraph(titulo.upper(), style='Title').runs[0].font.size = Pt(16)
     document.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-    document.add_paragraph(f"\n\npor\n\n{autor}").alignment = WD_ALIGN_PARAGRAPH.CENTER
+    document.add_paragraph(f"\\n\\npor\\n\\n{autor}").alignment = WD_ALIGN_PARAGRAPH.CENTER
     document.add_page_break()
     style = document.styles['Normal']
     style.font.name = 'Times New Roman'
@@ -118,7 +118,7 @@ def gerar_manuscrito_final_docx(titulo: str, autor: str, texto_manuscrito: str):
     style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     style.paragraph_format.line_spacing_rule = WD_LINE_SPACING.DOUBLE
     style.paragraph_format.first_line_indent = Cm(1.25)
-    for para_texto in texto_final.split('\n\n'):
+    for para_texto in texto_final.split('\\n\\n'):
         if para_texto.strip(): document.add_paragraph(para_texto.strip())
     for section in document.sections:
         footer = section.footer
@@ -140,7 +140,7 @@ def gerar_manuscrito_final_docx(titulo: str, autor: str, texto_manuscrito: str):
     return buffer
 
 # --- INTERFACE DO USUÁRIO (FRONTEND) ---
-st.title("Adapta ONE - Editor Literário IA ��")
+st.title("Adapta ONE - Editor Literário IA 📚")
 st.markdown("Transforme seu rascunho em um manuscrito profissional pronto para publicação.")
 
 with st.sidebar:
@@ -182,7 +182,7 @@ with tab1:
                     st.session_state.text_content = io.StringIO(uploaded_file.getvalue().decode("utf-8")).read()
                 else:
                     doc = Document(io.BytesIO(uploaded_file.read()))
-                    st.session_state.text_content = "\n\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+                    st.session_state.text_content = "\\n\\n".join([p.text for p in doc.paragraphs if p.text.strip()])
             st.session_state.file_processed = True
     if st.session_state.file_processed:
         st.subheader("Editor de Manuscrito")
@@ -226,11 +226,11 @@ with tab2:
             if st.session_state.sugestoes_estilo:
                 with st.expander("Sugestões de Estilo e Coerência da IA", expanded=False):
                     for sugestao in st.session_state.sugestoes_estilo:
-                        st.info(sugestao.strip(), icon="��")
+                        # --- LINHA CORRIGIDA ---
+                        st.info(sugestao.strip(), icon="💡")
             if st.session_state.metadados_gerados:
                 with st.expander("Metadados Gerados pela IA", expanded=False):
                     st.text_input("Título Sugerido", value=st.session_state.metadados_gerados['titulo'])
-                    # --- LINHA CORRIGIDA ---
                     st.text_input("Palavras-chave Sugeridas", value=st.session_state.metadados_gerados['palavras_chave'])
                     st.text_area("Sinopse Sugerida", value=st.session_state.metadados_gerados['sinopse'], height=200)
 
