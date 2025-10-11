@@ -15,7 +15,6 @@ from openai import OpenAI
 st.set_page_config(page_title="Adapta ONE - Editor Profissional", page_icon="✒️", layout="wide")
 
 def inicializar_estado():
-    # Unificamos para usar 'text_content' como a única fonte de verdade para o editor
     chaves_estado = {
         "text_content": "", "file_processed": False,
         "book_title": "Sem Título", "author_name": "Autor Desconhecido", "contact_info": "seuemail@exemplo.com",
@@ -96,8 +95,6 @@ def processar_arquivo_carregado():
             else:
                 doc = Document(io.BytesIO(uploaded_file.read()))
                 text = "\n\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-            
-            # Ação principal: Atualiza a variável de estado que o editor está usando
             st.session_state.text_content = text
             st.session_state.file_processed = True
             st.session_state.sugestoes_estilo = None
@@ -140,18 +137,11 @@ with tab1:
     )
 
     st.subheader("Editor Principal")
-    
-    # ★ A MÁGICA DA CORREÇÃO ESTÁ AQUI ★
-    # O widget 'st.text_area' agora usa 'text_content' como sua chave (key).
-    # Isso cria uma ligação direta: qualquer mudança em st.session_state.text_content
-    # (feita pelo upload) é refletida aqui. E qualquer edição feita pelo usuário
-    # aqui dentro atualiza automaticamente st.session_state.text_content.
     st.text_area(
         "Seu texto aparecerá aqui após o upload. Você também pode colar diretamente.",
         height=600,
-        key="text_content" # Chave unificada!
+        key="text_content"
     )
-    # A lógica antiga de `if edited_text != ...` não é mais necessária!
 
 with tab2:
     st.header("Assistente de Escrita com IA (Opcional)")
@@ -163,10 +153,12 @@ with tab2:
         if st.button("Analisar Estilo e Coerência (IA)", use_container_width=True):
             with st.spinner("IA está lendo seu texto..."):
                 st.session_state.sugestoes_estilo = gerar_sugestoes_estilo_ia(st.session_state.text_content, st.session_state.openai_client)
+        
         if st.session_state.sugestoes_estilo:
             st.subheader("Sugestões da IA")
             for sugestao in st.session_state.sugestoes_estilo:
-                st.info(sugestao, icon="��")
+                # ★★★ A CORREÇÃO FINAL ESTÁ AQUI ★★★
+                st.info(sugestao, icon="💡")
 
 with tab3:
     st.header("Finalize e Exporte seu Manuscrito Profissional")
