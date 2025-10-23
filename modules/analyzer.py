@@ -404,6 +404,13 @@ class ManuscriptAnalyzer:
         
         return opportunities
     
+    def save_analysis(self, analysis_result: Dict, output_path: str):
+        """
+        Salva análise em arquivo Markdown.
+        Alias para save_report para compatibilidade.
+        """
+        self.save_report(analysis_result, Path(output_path))
+    
     def save_report(self, analysis_result: Dict, output_path: Path):
         """Salva relatório de análise em arquivo Markdown."""
         lines = [
