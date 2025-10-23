@@ -83,9 +83,9 @@ class ManuscriptPublisher:
             self.analyzer.save_analysis(analysis_result, str(analysis_path))
             
             tracker.end_phase("ANALYSIS", {
-                "word_count": analysis_result["metadata"]["word_count"],
-                "page_count": analysis_result["metadata"]["page_count"],
-                "chapter_count": len(analysis_result["structure"]["chapters"]),
+                "word_count": analysis_result["word_count"],
+                "page_count": analysis_result["page_count"],
+                "chapter_count": analysis_result["structure"]["chapter_count"],
                 "quality_score": analysis_result["quality"]["overall_score"]
             })
             
@@ -227,20 +227,29 @@ class ManuscriptPublisher:
                 "action": "Revisão abrangente necessária"
             })
         
-        # Verifica legibilidade
-        if quality["readability_score"] < 0.6:
+        # Verifica legibilidade baseada em palavras por sentença
+        avg_words = quality.get("avg_words_per_sentence", 0)
+        if avg_words > 25:
             opportunities["medium_priority"].append({
                 "category": "readability",
-                "description": "Legibilidade pode ser melhorada",
+                "description": "Sentenças muito longas podem prejudicar legibilidade",
                 "action": "Simplificar sentenças e parágrafos"
             })
         
-        # Verifica consistência
-        if quality["consistency_score"] < 0.7:
+        # Verifica consistência terminológica
+        if quality["term_consistency"]["score"] < 0.7:
             opportunities["medium_priority"].append({
                 "category": "consistency",
-                "description": "Inconsistências terminológicas",
+                "description": "Inconsistências terminológicas detectadas",
                 "action": "Padronizar termos e formatação"
+            })
+        
+        # Verifica formatação
+        if quality["formatting"]["score"] < 0.7:
+            opportunities["medium_priority"].append({
+                "category": "formatting",
+                "description": "Problemas de formatação detectados",
+                "action": "Corrigir problemas de formatação"
             })
         
         return opportunities

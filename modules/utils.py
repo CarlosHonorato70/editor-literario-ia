@@ -22,17 +22,21 @@ class Colors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
-def setup_logging(level: str = "INFO") -> logging.Logger:
+def setup_logging(level = "INFO") -> logging.Logger:
     """
     Configura o sistema de logging.
     
     Args:
-        level: Nível de logging (DEBUG, INFO, WARNING, ERROR)
+        level: Nível de logging (DEBUG, INFO, WARNING, ERROR) ou int
         
     Returns:
         Logger configurado
     """
-    numeric_level = getattr(logging, level.upper(), logging.INFO)
+    # Handle both string and int levels
+    if isinstance(level, str):
+        numeric_level = getattr(logging, level.upper(), logging.INFO)
+    else:
+        numeric_level = level
     
     logging.basicConfig(
         level=numeric_level,
@@ -273,11 +277,37 @@ def write_file_safe(file_path: str, content: str, encoding: str = 'utf-8') -> bo
 class ProgressTracker:
     """Classe para rastrear progresso de operações longas."""
     
-    def __init__(self, total: int, description: str = "Processando"):
+    def __init__(self, total: int = 7, description: str = "Processando"):
         self.total = total
         self.current = 0
         self.description = description
         self.start_time = time.time()
+        self.phases = {}
+        self.phase_start_times = {}
+    
+    def start_phase(self, phase_name: str):
+        """Inicia uma nova fase de processamento."""
+        self.phase_start_times[phase_name] = time.time()
+    
+    def end_phase(self, phase_name: str, metrics: dict = None):
+        """Finaliza uma fase de processamento."""
+        if phase_name in self.phase_start_times:
+            duration = time.time() - self.phase_start_times[phase_name]
+            self.phases[phase_name] = {
+                'duration': duration,
+                'metrics': metrics or {}
+            }
+    
+    def get_summary(self) -> dict:
+        """Retorna resumo do progresso."""
+        summary = {}
+        for phase_name, phase_data in self.phases.items():
+            summary[phase_name] = phase_data['metrics']
+        return summary
+    
+    def get_total_time(self) -> float:
+        """Retorna tempo total de processamento."""
+        return time.time() - self.start_time
     
     def update(self, increment: int = 1):
         """Atualiza progresso."""
