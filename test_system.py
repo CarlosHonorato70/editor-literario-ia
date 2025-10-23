@@ -125,7 +125,7 @@ def test_proof_checker():
         
         # Testar verificação de texto simples
         test_text = "Este é um texto de teste."
-        issues = checker.check_formatting(test_text)
+        issues = checker._check_text(test_text)
         print_success(f"Verificação de formatação: {len(issues)} problemas encontrados")
         
         print("\n📊 Resultado: Proof Checker funcional")
@@ -173,10 +173,10 @@ def test_cover_designer():
         print_success("CoverDesigner inicializado (sem IA)")
         
         # Testar paletas de cores
-        palettes = designer._get_color_palettes('academic')
+        palettes = designer.COLOR_PALETTES.get('academic', [])
         print_success(f"Paletas para 'academic': {len(palettes)} disponíveis")
         
-        palettes = designer._get_color_palettes('fiction')
+        palettes = designer.COLOR_PALETTES.get('fiction', [])
         print_success(f"Paletas para 'fiction': {len(palettes)} disponíveis")
         
         print("\n📊 Resultado: Cover Designer funcional")

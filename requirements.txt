@@ -10,3 +10,13 @@ python-docx>=0.8.11
 openai>=1.0.0
 language-tool-python>=2.7.0  # Para gramática e ortografia
 smartypants>=0.1             # Para tipografia profissional
+
+# Dependências do Sistema de Produção Editorial
+PyYAML>=6.0                  # Configurações YAML
+Pillow>=10.0.0               # Processamento de imagens para capas
+Jinja2>=3.1.0                # Templates para geração de documentos
+WeasyPrint>=60.0             # Geração de PDFs profissionais
+python-barcode>=0.15.0       # Geração de códigos de barras ISBN
+qrcode[pil]>=7.4.0           # Geração de QR codes
+Markdown>=3.5.0              # Processamento de Markdown
+requests>=2.31.0             # Downloads de recursos externos
