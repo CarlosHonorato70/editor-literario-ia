@@ -409,7 +409,7 @@ def processar_manuscrito_completo(input_file, metadata: ManuscriptMetadata, conf
                     'word_count': analysis.get('word_count', 0),
                     'page_count': analysis.get('page_count', 0)
                 },
-                'isbn': isbn_data['isbn'] if resultados.get('isbn') else None,
+                'isbn': resultados['isbn']['isbn'] if resultados.get('isbn') else None,
                 'timestamp': datetime.now().isoformat()
             }
             json.dump(json_results, f, indent=2, ensure_ascii=False)
