@@ -47,7 +47,63 @@ Este sistema transforma manuscritos brutos (PDF, DOCX, MD) em obras **completame
 
 ---
 
-## 🚀 Início Rápido
+## 🎨 Interface Web Interativa ⭐ **NOVO**
+
+### Aplicação Streamlit Completa
+
+Execute a interface web profissional com um único comando:
+
+**🐧 Linux/Mac:**
+```bash
+./run_app.sh
+```
+
+**🪟 Windows:**
+```cmd
+run_app.bat
+```
+
+**💻 Alternativa (todos os sistemas):**
+```bash
+streamlit run app_completo.py
+```
+
+**Acesse:** http://localhost:8501
+
+📖 **Guia Completo Windows:** [GUIA_WINDOWS.md](GUIA_WINDOWS.md) ⭐
+
+![Editor Literário IA - Interface](https://github.com/user-attachments/assets/9de592ca-6151-425d-ae17-cea934bb4b9d)
+
+### 🌟 Três Modos de Operação
+
+#### 1. 📝 Editor Rápido
+- Upload e edição de manuscritos
+- FastFormat com tipografia profissional
+- Sugestões de IA para estilo
+- Export para DOCX formatado
+
+![Modo Editor Rápido](https://github.com/user-attachments/assets/9de592ca-6151-425d-ae17-cea934bb4b9d)
+
+#### 2. 🔄 Workflow Completo (14 Fases)
+- Processamento completo do manuscrito
+- Geração automática de ISBN e CIP
+- Design de capas profissionais
+- Arquivos print-ready para gráfica
+
+![Workflow Completo](https://github.com/user-attachments/assets/025246ad-11f7-40b6-bfdb-3097563d5dfe)
+
+#### 3. 📊 Análise e Relatórios
+- Métricas de qualidade
+- Análise estrutural
+- Recomendações de melhoria
+
+![Modo Análise](https://github.com/user-attachments/assets/19eff9f0-b253-45f9-bfa4-2181f1917cfd)
+
+📖 **Guia Completo:** [INICIO_RAPIDO.md](INICIO_RAPIDO.md)
+
+---
+
+## 🚀 Início Rápido (Linha de Comando)
 
 ### Workflow Completo (14 Fases) ⭐ **NOVO**
 
