@@ -175,6 +175,8 @@ def processar_arquivo_carregado():
             st.session_state.text_content = text
             st.session_state.file_processed = True
             st.session_state.sugestoes_estilo = None
+            # Force a rerun to update the text_area widget with the new content
+            st.rerun()
         except Exception as e:
             st.error(f"Ocorreu um erro ao ler o arquivo: {e}")
             st.session_state.text_content = ""
