@@ -141,7 +141,12 @@ with st.sidebar:
             st.error("API Key inválida."); st.session_state.api_key_valida = False
 
 # --- ABAS DE FLUXO DE TRABALHO ---
-tab1, tab2, tab3 = st.tabs(["1. Escrever & Editar", "2. Sugestões de Estilo (Opcional)", "3. Finalizar & Baixar"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "1. Escrever & Editar", 
+    "2. FastFormat (Formatação)", 
+    "3. Sugestões de Estilo (IA)", 
+    "4. Finalizar & Baixar"
+])
 
 with tab1:
     st.subheader("Cole ou Faça o Upload do seu Manuscrito")
@@ -160,6 +165,114 @@ with tab1:
     )
 
 with tab2:
+    st.header("✨ FastFormat - Formatação Tipográfica Profissional")
+    
+    if not st.session_state.text_content:
+        st.info("📝 Escreva ou carregue um texto na primeira aba para usar o FastFormat.", icon="ℹ️")
+    else:
+        st.markdown("""
+        ### O que o FastFormat faz?
+        
+        O FastFormat aplica formatação tipográfica profissional ao seu texto:
+        
+        - **Aspas Curvas:** `"texto"` → `"texto"`
+        - **Travessões em Diálogos:** `- Olá` → `— Olá`
+        - **Travessões em Intervalos:** `10-20` → `10–20`
+        - **Reticências:** `...` → `…`
+        - **Espaçamento:** Remove espaços extras
+        - **Pontuação PT-BR:** Ajusta automaticamente
+        """)
+        
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.subheader("⚙️ Opções de Formatação")
+            
+            preset = st.radio(
+                "Escolha o preset:",
+                ["PT-BR (Ficção)", "Acadêmico/Técnico", "Personalizado"],
+                help="PT-BR usa travessões em diálogos. Acadêmico preserva formatação original."
+            )
+            
+            if preset == "Personalizado":
+                st.markdown("**Configurações Personalizadas:**")
+                custom_quotes = st.checkbox("Aspas curvas", value=True)
+                custom_dialogue = st.selectbox("Diálogos:", ["Travessão (—)", "Hífen (-)"], index=0)
+                custom_ellipsis = st.checkbox("Normalizar reticências (...→…)", value=True)
+                custom_bullets = st.checkbox("Normalizar marcadores (•)", value=True)
+        
+        with col2:
+            st.subheader("👁️ Visualizar Resultado")
+            
+            if st.button("🔍 Prévia da Formatação", type="primary", use_container_width=True):
+                with st.spinner("Aplicando FastFormat..."):
+                    from modules.fastformat_utils import apply_fastformat, get_ptbr_options, get_academic_options
+                    from fastformat import FastFormatOptions
+                    
+                    # Determine options based on preset
+                    if preset == "PT-BR (Ficção)":
+                        options = get_ptbr_options()
+                    elif preset == "Acadêmico/Técnico":
+                        options = get_academic_options()
+                    else:  # Personalizado
+                        options = FastFormatOptions(
+                            normalize_whitespace=True,
+                            quotes_style="curly" if custom_quotes else "straight",
+                            dialogue_dash="emdash" if custom_dialogue == "Travessão (—)" else "hyphen",
+                            normalize_ellipsis=custom_ellipsis,
+                            normalize_bullets=custom_bullets,
+                            smart_ptbr_punctuation=True
+                        )
+                    
+                    texto_formatado = apply_fastformat(st.session_state.text_content, options)
+                    st.session_state['fastformat_preview'] = texto_formatado
+            
+            if 'fastformat_preview' in st.session_state:
+                st.success("✅ Prévia gerada! Role para baixo para ver o resultado.")
+        
+        # Show preview if available
+        if 'fastformat_preview' in st.session_state:
+            st.divider()
+            st.subheader("📄 Prévia do Texto Formatado")
+            
+            # Show before/after comparison
+            col_before, col_after = st.columns(2)
+            
+            with col_before:
+                st.markdown("**Antes (original):**")
+                st.text_area(
+                    "Texto original",
+                    value=st.session_state.text_content[:1000] + ("..." if len(st.session_state.text_content) > 1000 else ""),
+                    height=300,
+                    disabled=True,
+                    label_visibility="collapsed"
+                )
+            
+            with col_after:
+                st.markdown("**Depois (FastFormat):**")
+                st.text_area(
+                    "Texto formatado",
+                    value=st.session_state['fastformat_preview'][:1000] + ("..." if len(st.session_state['fastformat_preview']) > 1000 else ""),
+                    height=300,
+                    disabled=True,
+                    label_visibility="collapsed"
+                )
+            
+            # Action buttons
+            col_action1, col_action2 = st.columns(2)
+            with col_action1:
+                if st.button("✅ Aplicar ao Texto", type="primary", use_container_width=True):
+                    st.session_state.text_content = st.session_state['fastformat_preview']
+                    del st.session_state['fastformat_preview']
+                    st.success("✅ Formatação aplicada ao texto principal!")
+                    st.rerun()
+            
+            with col_action2:
+                if st.button("❌ Descartar", use_container_width=True):
+                    del st.session_state['fastformat_preview']
+                    st.rerun()
+
+with tab3:
     st.header("Assistente de Escrita com IA (Opcional)")
     if not st.session_state.text_content:
         st.info("Escreva ou carregue um texto na primeira aba para começar.")
@@ -176,7 +289,7 @@ with tab2:
                 # ★★★ A CORREÇÃO FINAL ESTÁ AQUI ★★★
                 st.info(sugestao, icon="💡")
 
-with tab3:
+with tab4:
     st.header("Finalize e Exporte seu Manuscrito Profissional")
     if not st.session_state.text_content:
         st.warning("Não há texto para finalizar. Escreva ou carregue seu manuscrito na primeira aba.")
