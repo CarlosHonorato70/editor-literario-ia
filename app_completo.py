@@ -793,6 +793,20 @@ def exibir_workflow_completo():
                     with st.expander("📋 Ver Ficha Catalográfica (CIP)"):
                         if resultados.get('cip'):
                             st.code(resultados['cip'], language='text')
+                    
+                    # Download do manuscrito processado
+                    if resultados.get('formatted'):
+                        formatted_content = resultados['formatted']
+                        if isinstance(formatted_content, dict):
+                            formatted_content = formatted_content.get('content', str(formatted_content))
+                        
+                        st.download_button(
+                            label="📥 Baixar Manuscrito Processado",
+                            data=str(formatted_content),
+                            file_name=f"{metadata.title}_processado.txt",
+                            mime="text/plain",
+                            help="Download do manuscrito com todas as melhorias aplicadas"
+                        )
                 
                 # Download dos resultados
                 if st.session_state.workflow_dir:
