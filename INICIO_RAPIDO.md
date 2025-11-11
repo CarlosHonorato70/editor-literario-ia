@@ -4,17 +4,36 @@
 
 ### Opção 1: Script Automático (Mais Fácil)
 
+**🐧 Linux/Mac:**
 ```bash
 ./run_app.sh
 ```
 
+**🪟 Windows:**
+```cmd
+run_app.bat
+```
+
 A aplicação será aberta automaticamente em: **http://localhost:8501**
 
-### Opção 2: Comando Direto
+### Opção 2: Comando Direto (Todos os sistemas)
 
 ```bash
 streamlit run app_completo.py
 ```
+
+### 🪟 Problemas no Windows?
+
+Se você viu erros como:
+- `'.' não é reconhecido como um comando interno`
+- `File does not exist: app_completo.py`
+
+**👉 Consulte o guia completo:** [GUIA_WINDOWS.md](GUIA_WINDOWS.md)
+
+**Solução rápida:**
+1. Certifique-se de estar no diretório correto
+2. Use `run_app.bat` em vez de `./run_app.sh`
+3. Ou use: `streamlit run app_completo.py`
 
 ---
 

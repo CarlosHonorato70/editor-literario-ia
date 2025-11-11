@@ -53,15 +53,24 @@ Este sistema transforma manuscritos brutos (PDF, DOCX, MD) em obras **completame
 
 Execute a interface web profissional com um único comando:
 
+**🐧 Linux/Mac:**
 ```bash
-# Inicie a aplicação
 ./run_app.sh
+```
 
-# Ou use diretamente
+**🪟 Windows:**
+```cmd
+run_app.bat
+```
+
+**💻 Alternativa (todos os sistemas):**
+```bash
 streamlit run app_completo.py
 ```
 
 **Acesse:** http://localhost:8501
+
+📖 **Guia Completo Windows:** [GUIA_WINDOWS.md](GUIA_WINDOWS.md) ⭐
 
 ![Editor Literário IA - Interface](https://github.com/user-attachments/assets/9de592ca-6151-425d-ae17-cea934bb4b9d)
 
