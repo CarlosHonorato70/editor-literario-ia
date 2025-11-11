@@ -296,7 +296,7 @@ def processar_manuscrito_completo(input_file, metadata: ManuscriptMetadata, conf
             try:
                 analysis = analyzer.analyze(str(temp_input))
                 resultados['analysis'] = analysis
-                st.success(f"✅ Análise concluída: {analysis['metadata']['word_count']} palavras")
+                st.success(f"✅ Análise concluída: {analysis.get('word_count', 0)} palavras")
             except Exception as e:
                 st.error(f"❌ Erro na análise: {e}")
                 return None
@@ -367,10 +367,10 @@ def processar_manuscrito_completo(input_file, metadata: ManuscriptMetadata, conf
                     'pages': metadata.page_count
                 },
                 'analysis_summary': {
-                    'word_count': analysis['metadata']['word_count'],
-                    'page_count': analysis['metadata']['page_count']
+                    'word_count': analysis.get('word_count', 0),
+                    'page_count': analysis.get('page_count', 0)
                 },
-                'isbn': isbn_data['isbn'] if resultados['isbn'] else None,
+                'isbn': isbn_data['isbn'] if resultados.get('isbn') else None,
                 'timestamp': datetime.now().isoformat()
             }
             json.dump(json_results, f, indent=2, ensure_ascii=False)
@@ -843,11 +843,11 @@ def exibir_analise_relatorios():
                     col1, col2, col3, col4 = st.columns(4)
                     
                     with col1:
-                        word_count = analysis['metadata'].get('word_count', 0)
+                        word_count = analysis.get('word_count', 0)
                         st.metric("Palavras", f"{word_count:,}")
                     
                     with col2:
-                        page_count = analysis['metadata'].get('page_count', 0)
+                        page_count = analysis.get('page_count', 0)
                         st.metric("Páginas Estimadas", page_count)
                     
                     with col3:
