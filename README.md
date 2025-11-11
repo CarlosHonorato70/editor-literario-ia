@@ -1,20 +1,14 @@
 # Sistema Automatizado de Preparação de Manuscritos para Publicação
 
-**Versão 2.0** | Desenvolvido por Manus AI | Novembro 2025
+**Versão 2.0** | Desenvolvido por Manus AI | Outubro 2025
 
 ---
 
 ## 📖 Visão Geral
 
-Sistema completo e automatizado que replica o processo profissional de preparação de manuscritos para publicação, incluindo o **fluxo completo de 14 fases** do manuscrito bruto até a gráfica.
+Sistema completo e automatizado que replica o processo profissional de preparação de manuscritos para publicação, baseado na metodologia comprovada utilizada no projeto "Modelo VIP - Uma Nova Síntese em Psicoterapia".
 
 Este sistema transforma manuscritos brutos (PDF, DOCX, MD) em obras **completamente prontas para impressão e publicação**, incluindo:
-
-### ⭐ NOVO: Workflow Completo (14 Fases)
-- ✅ **Fase 1-6**: Recebimento → Edição → Revisão → Aprovação
-- ✅ **Fase 7-9**: Diagramação → Design de Capa (5 conceitos)
-- ✅ **Fase 10**: Geração de ISBN e CIP automatizada
-- ✅ **Fase 11-14**: Preparação para impressão → Pacote para gráfica
 
 ### Preparação de Manuscrito (Fases 1 e 2)
 - ✅ Análise estrutural e de qualidade
@@ -48,21 +42,6 @@ Este sistema transforma manuscritos brutos (PDF, DOCX, MD) em obras **completame
 ---
 
 ## 🚀 Início Rápido
-
-### Workflow Completo (14 Fases) ⭐ **NOVO**
-
-```bash
-# Execute o workflow completo: do manuscrito até a gráfica
-python complete_workflow.py manuscrito.pdf \
-  --title "Meu Livro" \
-  --author "Nome do Autor" \
-  --genre "Ficção" \
-  --pages 300
-
-# Resultado: Pacote completo pronto para envio à gráfica!
-```
-
-📖 **Documentação Completa**: [WORKFLOW_COMPLETO.md](WORKFLOW_COMPLETO.md)
 
 ### Instalação
 
@@ -506,37 +485,11 @@ self.meu_modulo = MeuModulo(self.config)
 
 ## 📚 Documentação Adicional
 
-- **[🎯 Workflow Completo (14 Fases)](WORKFLOW_COMPLETO.md)** ⭐ **NOVO**
-- **[FastFormat - Documentação Completa](FASTFORMAT_DOCS.md)**
+- **[FastFormat - Documentação Completa](FASTFORMAT_DOCS.md)** ⭐ **NOVO**
 - **[Guia de Instalação Detalhado](INSTALL.md)**
 - **[Visão Geral do Sistema](SYSTEM_OVERVIEW.md)**
 - **[Guia de Início Rápido](QUICKSTART.md)**
 - **[Exemplos de Uso](examples/)**
-
-## 🎯 Recursos Principais
-
-### Workflow Completo (14 Fases) ⭐ **NOVO**
-
-Execute o fluxo completo de publicação automaticamente:
-
-```bash
-python complete_workflow.py manuscrito.pdf \
-  --title "Meu Livro" \
-  --author "Autor" \
-  --genre "Ficção"
-```
-
-**Saída**:
-- ✅ Manuscrito editado e revisado
-- ✅ ISBN-13 válido com código de barras
-- ✅ Ficha CIP (Catalogação na Publicação)
-- ✅ 5 conceitos de capa profissionais
-- ✅ PDF do miolo diagramado (300 DPI, CMYK)
-- ✅ PDF da capa com lombada calculada
-- ✅ Especificações técnicas para gráfica
-- ✅ Pacote completo pronto para impressão
-
-📖 **Veja**: [WORKFLOW_COMPLETO.md](WORKFLOW_COMPLETO.md) para detalhes
 
 ---
 
