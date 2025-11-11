@@ -9,7 +9,30 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from openai import OpenAI
-from streamlit_quill import st_quill
+
+# Try to import streamlit_quill, show helpful error if not available
+try:
+    from streamlit_quill import st_quill
+    RICH_EDITOR_AVAILABLE = True
+except ImportError:
+    RICH_EDITOR_AVAILABLE = False
+    st.error("""
+    ⚠️ **Editor Avançado não disponível!**
+    
+    O módulo `streamlit-quill` não está instalado. Para usar o Editor Avançado (Word-like), instale executando:
+    
+    ```bash
+    pip install streamlit-quill
+    ```
+    
+    Ou reinstale todas as dependências:
+    
+    ```bash
+    pip install -r requirements.txt
+    ```
+    
+    Depois, reinicie o aplicativo.
+    """)
 
 # Import FastFormat for advanced text formatting
 from modules.fastformat_utils import apply_fastformat, get_ptbr_options
@@ -217,81 +240,105 @@ with tab1:
     )
     
     # Sync button to rich editor
-    if st.button("📤 Enviar para Editor Avançado", help="Carrega o texto no Editor Avançado (Word-like) para edição com formatação rica"):
-        if st.session_state.text_content:
-            st.session_state.rich_editor_content = plain_text_to_html(st.session_state.text_content)
-            st.session_state.use_rich_editor = True
-            st.success("✅ Texto carregado no Editor Avançado! Vá para a aba 'Editor Avançado (Word-like)' para editar.")
-        else:
-            st.warning("⚠️ Adicione texto antes de enviar para o Editor Avançado.")
+    if RICH_EDITOR_AVAILABLE:
+        if st.button("📤 Enviar para Editor Avançado", help="Carrega o texto no Editor Avançado (Word-like) para edição com formatação rica"):
+            if st.session_state.text_content:
+                st.session_state.rich_editor_content = plain_text_to_html(st.session_state.text_content)
+                st.session_state.use_rich_editor = True
+                st.success("✅ Texto carregado no Editor Avançado! Vá para a aba 'Editor Avançado (Word-like)' para editar.")
+            else:
+                st.warning("⚠️ Adicione texto antes de enviar para o Editor Avançado.")
+    else:
+        st.warning("⚠️ Editor Avançado não disponível. Instale `streamlit-quill` para usar: `pip install streamlit-quill`")
 
 with tab2:
     st.header("✍️ Editor Avançado - Interface estilo Word")
     
-    st.markdown("""
-    ### 📝 Editor de Texto Rico com Barra de Ferramentas
-    
-    Este editor oferece uma experiência similar ao Microsoft Word com:
-    
-    - **Formatação de texto:** Negrito, itálico, sublinhado, tachado
-    - **Títulos:** H1, H2, H3 (títulos de diferentes níveis)
-    - **Listas:** Com marcadores ou numeradas
-    - **Alinhamento:** Esquerda, centro, direita, justificado
-    - **Links e imagens:** Adicione links e imagens ao texto
-    - **Cores:** Personalize cores de texto e fundo
-    - **Desfazer/Refazer:** Histórico completo de edição
-    
-    **💡 Dica:** Use o editor para intervir manualmente no processo de edição quando necessário!
-    """)
-    
-    st.divider()
-    
-    # Check if content exists
-    if not st.session_state.get('rich_editor_content') and not st.session_state.text_content:
-        st.info("📝 Escreva ou carregue um texto na primeira aba, depois use o botão '📤 Enviar para Editor Avançado'.", icon="ℹ️")
+    # Check if rich editor is available
+    if not RICH_EDITOR_AVAILABLE:
+        st.error("""
+        ### ⚠️ Editor Avançado não disponível
         
-        # Option to start fresh
-        if st.button("✨ Começar novo documento no Editor"):
-            st.session_state.rich_editor_content = "<p>Comece a escrever seu texto aqui...</p>"
-            st.session_state.use_rich_editor = True
-            st.rerun()
+        O módulo `streamlit-quill` não está instalado. 
+        
+        **Para ativar o Editor Avançado:**
+        
+        1. Pare o aplicativo (Ctrl+C no terminal)
+        2. Execute: `pip install streamlit-quill`
+        3. Reinicie o aplicativo: `streamlit run app_editor.py`
+        
+        Ou reinstale todas as dependências:
+        ```bash
+        pip install -r requirements.txt
+        ```
+        """)
+        st.info("💡 Enquanto isso, você pode usar o Editor Principal (Aba 1) para editar seu texto.", icon="ℹ️")
     
     else:
-        # Initialize rich editor content if not exists
-        if not st.session_state.get('rich_editor_content'):
-            st.session_state.rich_editor_content = plain_text_to_html(st.session_state.text_content)
+        st.markdown("""
+        ### 📝 Editor de Texto Rico com Barra de Ferramentas
         
-        st.subheader("🖊️ Área de Edição")
+        Este editor oferece uma experiência similar ao Microsoft Word com:
         
-        # Rich text editor with full toolbar
-        content = st_quill(
-            value=st.session_state.rich_editor_content,
-            html=True,
-            readonly=False,
-            key='quill_editor',
-            toolbar=[
-                ['bold', 'italic', 'underline', 'strike'],
-                ['blockquote', 'code-block'],
-                [{'header': 1}, {'header': 2}],
-                [{'list': 'ordered'}, {'list': 'bullet'}],
-                [{'script': 'sub'}, {'script': 'super'}],
-                [{'indent': '-1'}, {'indent': '+1'}],
-                [{'direction': 'rtl'}],
-                [{'size': ['small', False, 'large', 'huge']}],
-                [{'header': [1, 2, 3, 4, 5, 6, False]}],
-                [{'color': []}, {'background': []}],
-                [{'font': []}],
-                [{'align': []}],
-                ['clean'],
-                ['link', 'image']
-            ]
-        )
+        - **Formatação de texto:** Negrito, itálico, sublinhado, tachado
+        - **Títulos:** H1, H2, H3 (títulos de diferentes níveis)
+        - **Listas:** Com marcadores ou numeradas
+        - **Alinhamento:** Esquerda, centro, direita, justificado
+        - **Links e imagens:** Adicione links e imagens ao texto
+        - **Cores:** Personalize cores de texto e fundo
+        - **Desfazer/Refazer:** Histórico completo de edição
         
-        # Update session state with editor content
-        if content:
-            st.session_state.rich_editor_content = content
+        **💡 Dica:** Use o editor para intervir manualmente no processo de edição quando necessário!
+        """)
         
         st.divider()
+        
+        # Check if content exists
+        if not st.session_state.get('rich_editor_content') and not st.session_state.text_content:
+            st.info("📝 Escreva ou carregue um texto na primeira aba, depois use o botão '📤 Enviar para Editor Avançado'.", icon="ℹ️")
+            
+            # Option to start fresh
+            if st.button("✨ Começar novo documento no Editor"):
+                st.session_state.rich_editor_content = "<p>Comece a escrever seu texto aqui...</p>"
+                st.session_state.use_rich_editor = True
+                st.rerun()
+        
+        else:
+            # Initialize rich editor content if not exists
+            if not st.session_state.get('rich_editor_content'):
+                st.session_state.rich_editor_content = plain_text_to_html(st.session_state.text_content)
+            
+            st.subheader("🖊️ Área de Edição")
+            
+            # Rich text editor with full toolbar
+            content = st_quill(
+                value=st.session_state.rich_editor_content,
+                html=True,
+                readonly=False,
+                key='quill_editor',
+                toolbar=[
+                    ['bold', 'italic', 'underline', 'strike'],
+                    ['blockquote', 'code-block'],
+                    [{'header': 1}, {'header': 2}],
+                    [{'list': 'ordered'}, {'list': 'bullet'}],
+                    [{'script': 'sub'}, {'script': 'super'}],
+                    [{'indent': '-1'}, {'indent': '+1'}],
+                    [{'direction': 'rtl'}],
+                    [{'size': ['small', False, 'large', 'huge']}],
+                    [{'header': [1, 2, 3, 4, 5, 6, False]}],
+                    [{'color': []}, {'background': []}],
+                    [{'font': []}],
+                    [{'align': []}],
+                    ['clean'],
+                    ['link', 'image']
+                ]
+            )
+            
+            # Update session state with editor content
+            if content:
+                st.session_state.rich_editor_content = content
+            
+            st.divider()
         
         # Action buttons
         col1, col2, col3 = st.columns(3)
