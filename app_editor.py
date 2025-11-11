@@ -2,7 +2,6 @@ import streamlit as st
 import io
 import re
 import math
-import smartypants
 import language_tool_python
 from docx import Document
 from docx.shared import Pt, Cm, Inches
@@ -11,6 +10,9 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from openai import OpenAI
 
+# Import FastFormat for advanced text formatting
+from modules.fastformat_utils import apply_fastformat, get_ptbr_options
+
 # --- CONFIGURAÇÃO DA PÁGINA E ESTADO ---
 st.set_page_config(page_title="Adapta ONE - Editor Profissional", page_icon="✒️", layout="wide")
 
@@ -18,7 +20,9 @@ def inicializar_estado():
     chaves_estado = {
         "text_content": "", "file_processed": False,
         "book_title": "Sem Título", "author_name": "Autor Desconhecido", "contact_info": "seuemail@exemplo.com",
-        "sugestoes_estilo": None, "api_key_valida": False
+        "sugestoes_estilo": None, "api_key_valida": False,
+        "use_fastformat": True,  # Enable FastFormat by default
+        "pending_text_update": None  # For handling text updates from FastFormat
     }
     for key, value in chaves_estado.items():
         if key not in st.session_state:
@@ -50,10 +54,15 @@ def gerar_sugestoes_estilo_ia(texto: str, client: OpenAI):
         st.error(f"Erro ao chamar a IA para análise de estilo: {e}")
         return ["Não foi possível gerar sugestões."]
 
-def gerar_manuscrito_profissional_docx(titulo: str, autor: str, contato: str, texto_manuscrito: str):
-    texto_limpo = smartypants.smartypants(texto_manuscrito, 2)
-    texto_limpo = re.sub(r'^\s*-\s+', '— ', texto_limpo, flags=re.MULTILINE)
-    texto_limpo = re.sub(r' +', ' ', texto_limpo)
+def gerar_manuscrito_profissional_docx(titulo: str, autor: str, contato: str, texto_manuscrito: str, use_fastformat: bool = True):
+    # Apply FastFormat for professional typography (replaces smartypants)
+    if use_fastformat:
+        texto_limpo = apply_fastformat(texto_manuscrito, get_ptbr_options())
+    else:
+        # Basic cleanup
+        texto_limpo = re.sub(r'^\s*-\s+', '— ', texto_manuscrito, flags=re.MULTILINE)
+        texto_limpo = re.sub(r' +', ' ', texto_limpo)
+    
     document = Document()
     for section in document.sections:
         section.top_margin = section.bottom_margin = section.left_margin = section.right_margin = Inches(1)
@@ -114,6 +123,14 @@ with st.sidebar:
     st.session_state.contact_info = st.text_input("Email ou Contato", st.session_state.contact_info)
     
     st.divider()
+    st.header("Opções de Formatação")
+    st.session_state.use_fastformat = st.checkbox(
+        "Usar FastFormat (Tipografia Avançada)", 
+        value=st.session_state.use_fastformat,
+        help="Aplica formatação tipográfica profissional: aspas curvas, travessões em diálogos, reticências padronizadas, etc."
+    )
+    
+    st.divider()
     st.header("Chave da OpenAI")
     api_key = st.text_input("Sua API Key (Opcional)", type="password", help="Necessária apenas para as sugestões de estilo.")
     if api_key:
@@ -125,9 +142,19 @@ with st.sidebar:
             st.error("API Key inválida."); st.session_state.api_key_valida = False
 
 # --- ABAS DE FLUXO DE TRABALHO ---
-tab1, tab2, tab3 = st.tabs(["1. Escrever & Editar", "2. Sugestões de Estilo (Opcional)", "3. Finalizar & Baixar"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "1. Escrever & Editar", 
+    "2. FastFormat (Formatação)", 
+    "3. Sugestões de Estilo (IA)", 
+    "4. Finalizar & Baixar"
+])
 
 with tab1:
+    # Handle pending text update from FastFormat
+    if st.session_state.get('pending_text_update'):
+        st.session_state.text_content = st.session_state['pending_text_update']
+        st.session_state['pending_text_update'] = None
+    
     st.subheader("Cole ou Faça o Upload do seu Manuscrito")
     st.file_uploader(
         "Formatos: .txt, .docx",
@@ -144,6 +171,114 @@ with tab1:
     )
 
 with tab2:
+    st.header("✨ FastFormat - Formatação Tipográfica Profissional")
+    
+    if not st.session_state.text_content:
+        st.info("📝 Escreva ou carregue um texto na primeira aba para usar o FastFormat.", icon="ℹ️")
+    else:
+        st.markdown("""
+        ### O que o FastFormat faz?
+        
+        O FastFormat aplica formatação tipográfica profissional ao seu texto:
+        
+        - **Aspas Curvas:** `"texto"` → `"texto"`
+        - **Travessões em Diálogos:** `- Olá` → `— Olá`
+        - **Travessões em Intervalos:** `10-20` → `10–20`
+        - **Reticências:** `...` → `…`
+        - **Espaçamento:** Remove espaços extras
+        - **Pontuação PT-BR:** Ajusta automaticamente
+        """)
+        
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.subheader("⚙️ Opções de Formatação")
+            
+            preset = st.radio(
+                "Escolha o preset:",
+                ["PT-BR (Ficção)", "Acadêmico/Técnico", "Personalizado"],
+                help="PT-BR usa travessões em diálogos. Acadêmico preserva formatação original."
+            )
+            
+            if preset == "Personalizado":
+                st.markdown("**Configurações Personalizadas:**")
+                custom_quotes = st.checkbox("Aspas curvas", value=True)
+                custom_dialogue = st.selectbox("Diálogos:", ["Travessão (—)", "Hífen (-)"], index=0)
+                custom_ellipsis = st.checkbox("Normalizar reticências (...→…)", value=True)
+                custom_bullets = st.checkbox("Normalizar marcadores (•)", value=True)
+        
+        with col2:
+            st.subheader("👁️ Visualizar Resultado")
+            
+            if st.button("🔍 Prévia da Formatação", type="primary", use_container_width=True):
+                with st.spinner("Aplicando FastFormat..."):
+                    from modules.fastformat_utils import apply_fastformat, get_ptbr_options, get_academic_options
+                    from fastformat import FastFormatOptions
+                    
+                    # Determine options based on preset
+                    if preset == "PT-BR (Ficção)":
+                        options = get_ptbr_options()
+                    elif preset == "Acadêmico/Técnico":
+                        options = get_academic_options()
+                    else:  # Personalizado
+                        options = FastFormatOptions(
+                            normalize_whitespace=True,
+                            quotes_style="curly" if custom_quotes else "straight",
+                            dialogue_dash="emdash" if custom_dialogue == "Travessão (—)" else "hyphen",
+                            normalize_ellipsis=custom_ellipsis,
+                            normalize_bullets=custom_bullets,
+                            smart_ptbr_punctuation=True
+                        )
+                    
+                    texto_formatado = apply_fastformat(st.session_state.text_content, options)
+                    st.session_state['fastformat_preview'] = texto_formatado
+            
+            if 'fastformat_preview' in st.session_state:
+                st.success("✅ Prévia gerada! Role para baixo para ver o resultado.")
+        
+        # Show preview if available
+        if 'fastformat_preview' in st.session_state:
+            st.divider()
+            st.subheader("📄 Prévia do Texto Formatado")
+            
+            # Show before/after comparison
+            col_before, col_after = st.columns(2)
+            
+            with col_before:
+                st.markdown("**Antes (original):**")
+                st.text_area(
+                    "Texto original",
+                    value=st.session_state.text_content[:1000] + ("..." if len(st.session_state.text_content) > 1000 else ""),
+                    height=300,
+                    disabled=True,
+                    label_visibility="collapsed"
+                )
+            
+            with col_after:
+                st.markdown("**Depois (FastFormat):**")
+                st.text_area(
+                    "Texto formatado",
+                    value=st.session_state['fastformat_preview'][:1000] + ("..." if len(st.session_state['fastformat_preview']) > 1000 else ""),
+                    height=300,
+                    disabled=True,
+                    label_visibility="collapsed"
+                )
+            
+            # Action buttons
+            col_action1, col_action2 = st.columns(2)
+            with col_action1:
+                if st.button("✅ Aplicar ao Texto", type="primary", use_container_width=True):
+                    st.session_state['pending_text_update'] = st.session_state['fastformat_preview']
+                    del st.session_state['fastformat_preview']
+                    st.success("✅ Formatação aplicada ao texto principal!")
+                    st.rerun()
+            
+            with col_action2:
+                if st.button("❌ Descartar", use_container_width=True):
+                    del st.session_state['fastformat_preview']
+                    st.rerun()
+
+with tab3:
     st.header("Assistente de Escrita com IA (Opcional)")
     if not st.session_state.text_content:
         st.info("Escreva ou carregue um texto na primeira aba para começar.")
@@ -160,18 +295,27 @@ with tab2:
                 # ★★★ A CORREÇÃO FINAL ESTÁ AQUI ★★★
                 st.info(sugestao, icon="💡")
 
-with tab3:
+with tab4:
     st.header("Finalize e Exporte seu Manuscrito Profissional")
     if not st.session_state.text_content:
         st.warning("Não há texto para finalizar. Escreva ou carregue seu manuscrito na primeira aba.")
     else:
         st.markdown("**O que este botão faz?**\n1. **Revisão Automática:** Aplica correções ortográficas e gramaticais.\n2. **Formatação Profissional:** Gera um arquivo `.docx` com todos os padrões da indústria.")
         
+        if st.session_state.use_fastformat:
+            st.info("✨ **FastFormat ativado:** Seu manuscrito terá formatação tipográfica profissional com aspas curvas, travessões, reticências e pontuação padronizada.", icon="✅")
+        
         if st.button("Revisão Automática & Download Profissional (.DOCX)", type="primary", use_container_width=True):
             with st.spinner("Automatizando revisões e montando seu manuscrito profissional..."):
                 tool = carregar_ferramenta_gramatical()
                 texto_corrigido = aplicar_correcoes_automaticas(st.session_state.text_content, tool)
-                docx_buffer = gerar_manuscrito_profissional_docx(st.session_state.book_title, st.session_state.author_name, st.session_state.contact_info, texto_corrigido)
+                docx_buffer = gerar_manuscrito_profissional_docx(
+                    st.session_state.book_title, 
+                    st.session_state.author_name, 
+                    st.session_state.contact_info, 
+                    texto_corrigido,
+                    use_fastformat=st.session_state.use_fastformat
+                )
             st.success("Manuscrito finalizado!")
             st.download_button(
                 label="BAIXAR MANUSCRITO.DOCX",

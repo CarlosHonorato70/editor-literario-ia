@@ -15,9 +15,18 @@ Este sistema transforma manuscritos brutos (PDF, DOCX, MD) em obras **completame
 - ✅ Aprimoramento de conteúdo com IA
 - ✅ Criação de elementos pré e pós-textuais
 - ✅ Revisão editorial profissional
+- ✅ **FastFormat: Formatação tipográfica avançada** ⭐ **NOVO**
 - ✅ Padronização de formatação
 - ✅ Geração de metadados e documentação
 - ✅ Exportação em múltiplos formatos
+
+### FastFormat - Tipografia Profissional ⭐ **NOVO**
+- ✨ **Aspas tipográficas** (curly quotes)
+- ✨ **Travessões para diálogos** (em-dash: —)
+- ✨ **Travessões para intervalos** (en-dash: 10–20)
+- ✨ **Reticências padronizadas** (…)
+- ✨ **Normalização de espaçamento**
+- ✨ **Pontuação PT-BR inteligente**
 
 ### Produção Editorial (Fase 3) ⭐ **NOVO**
 - ✅ **Design automatizado de capas** (5 layouts profissionais)
@@ -476,11 +485,11 @@ self.meu_modulo = MeuModulo(self.config)
 
 ## 📚 Documentação Adicional
 
-- **[Guia de Instalação Detalhado](docs/installation.md)**
-- **[Referência da API](docs/api_reference.md)**
-- **[Exemplos Avançados](examples/)**
-- **[Perguntas Frequentes](docs/faq.md)**
-- **[Changelog](CHANGELOG.md)**
+- **[FastFormat - Documentação Completa](FASTFORMAT_DOCS.md)** ⭐ **NOVO**
+- **[Guia de Instalação Detalhado](INSTALL.md)**
+- **[Visão Geral do Sistema](SYSTEM_OVERVIEW.md)**
+- **[Guia de Início Rápido](QUICKSTART.md)**
+- **[Exemplos de Uso](examples/)**
 
 ---
 
