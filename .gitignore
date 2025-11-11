@@ -39,3 +39,6 @@ configs/*_private.yaml
 temp/
 tmp/
 *.tmp
+
+# Generated project directories
+projects/
