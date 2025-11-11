@@ -9,4 +9,6 @@ python-docx>=0.8.11
 # IA e Processamento de Linguagem Natural (PLN)
 openai>=1.0.0
 language-tool-python>=2.7.0  # Para gramática e ortografia
-smartypants>=0.1             # Para tipografia profissional
+
+# Nota: FastFormat está incluído como módulo local (fastformat.py)
+# não requer instalação via pip

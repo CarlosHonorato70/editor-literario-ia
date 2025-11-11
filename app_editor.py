@@ -2,7 +2,6 @@ import streamlit as st
 import io
 import re
 import math
-import smartypants
 import language_tool_python
 from docx import Document
 from docx.shared import Pt, Cm, Inches
@@ -11,6 +10,9 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from openai import OpenAI
 
+# Import FastFormat for advanced text formatting
+from modules.fastformat_utils import apply_fastformat, get_ptbr_options
+
 # --- CONFIGURAÇÃO DA PÁGINA E ESTADO ---
 st.set_page_config(page_title="Adapta ONE - Editor Profissional", page_icon="✒️", layout="wide")
 
@@ -18,7 +20,8 @@ def inicializar_estado():
     chaves_estado = {
         "text_content": "", "file_processed": False,
         "book_title": "Sem Título", "author_name": "Autor Desconhecido", "contact_info": "seuemail@exemplo.com",
-        "sugestoes_estilo": None, "api_key_valida": False
+        "sugestoes_estilo": None, "api_key_valida": False,
+        "use_fastformat": True  # Enable FastFormat by default
     }
     for key, value in chaves_estado.items():
         if key not in st.session_state:
@@ -50,10 +53,15 @@ def gerar_sugestoes_estilo_ia(texto: str, client: OpenAI):
         st.error(f"Erro ao chamar a IA para análise de estilo: {e}")
         return ["Não foi possível gerar sugestões."]
 
-def gerar_manuscrito_profissional_docx(titulo: str, autor: str, contato: str, texto_manuscrito: str):
-    texto_limpo = smartypants.smartypants(texto_manuscrito, 2)
-    texto_limpo = re.sub(r'^\s*-\s+', '— ', texto_limpo, flags=re.MULTILINE)
-    texto_limpo = re.sub(r' +', ' ', texto_limpo)
+def gerar_manuscrito_profissional_docx(titulo: str, autor: str, contato: str, texto_manuscrito: str, use_fastformat: bool = True):
+    # Apply FastFormat for professional typography (replaces smartypants)
+    if use_fastformat:
+        texto_limpo = apply_fastformat(texto_manuscrito, get_ptbr_options())
+    else:
+        # Basic cleanup
+        texto_limpo = re.sub(r'^\s*-\s+', '— ', texto_manuscrito, flags=re.MULTILINE)
+        texto_limpo = re.sub(r' +', ' ', texto_limpo)
+    
     document = Document()
     for section in document.sections:
         section.top_margin = section.bottom_margin = section.left_margin = section.right_margin = Inches(1)
@@ -114,6 +122,14 @@ with st.sidebar:
     st.session_state.contact_info = st.text_input("Email ou Contato", st.session_state.contact_info)
     
     st.divider()
+    st.header("Opções de Formatação")
+    st.session_state.use_fastformat = st.checkbox(
+        "Usar FastFormat (Tipografia Avançada)", 
+        value=st.session_state.use_fastformat,
+        help="Aplica formatação tipográfica profissional: aspas curvas, travessões em diálogos, reticências padronizadas, etc."
+    )
+    
+    st.divider()
     st.header("Chave da OpenAI")
     api_key = st.text_input("Sua API Key (Opcional)", type="password", help="Necessária apenas para as sugestões de estilo.")
     if api_key:
@@ -167,11 +183,20 @@ with tab3:
     else:
         st.markdown("**O que este botão faz?**\n1. **Revisão Automática:** Aplica correções ortográficas e gramaticais.\n2. **Formatação Profissional:** Gera um arquivo `.docx` com todos os padrões da indústria.")
         
+        if st.session_state.use_fastformat:
+            st.info("✨ **FastFormat ativado:** Seu manuscrito terá formatação tipográfica profissional com aspas curvas, travessões, reticências e pontuação padronizada.", icon="✅")
+        
         if st.button("Revisão Automática & Download Profissional (.DOCX)", type="primary", use_container_width=True):
             with st.spinner("Automatizando revisões e montando seu manuscrito profissional..."):
                 tool = carregar_ferramenta_gramatical()
                 texto_corrigido = aplicar_correcoes_automaticas(st.session_state.text_content, tool)
-                docx_buffer = gerar_manuscrito_profissional_docx(st.session_state.book_title, st.session_state.author_name, st.session_state.contact_info, texto_corrigido)
+                docx_buffer = gerar_manuscrito_profissional_docx(
+                    st.session_state.book_title, 
+                    st.session_state.author_name, 
+                    st.session_state.contact_info, 
+                    texto_corrigido,
+                    use_fastformat=st.session_state.use_fastformat
+                )
             st.success("Manuscrito finalizado!")
             st.download_button(
                 label="BAIXAR MANUSCRITO.DOCX",

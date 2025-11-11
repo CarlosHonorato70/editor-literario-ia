@@ -9,6 +9,8 @@ import logging
 
 from .config import Config
 from .utils import print_info, ProgressTracker
+from .fastformat_utils import apply_fastformat, get_ptbr_options, get_academic_options
+from fastformat import FastFormatOptions
 
 class DocumentFormatter:
     """Formata e padroniza documentos para publicação."""
@@ -16,6 +18,20 @@ class DocumentFormatter:
     def __init__(self, config: Config):
         self.config = config
         self.logger = logging.getLogger(__name__)
+        self._setup_fastformat_options()
+    
+    def _setup_fastformat_options(self):
+        """Configura opções do FastFormat baseadas na configuração."""
+        # Determina o perfil de formatação baseado no tipo de manuscrito
+        manuscript_type = getattr(self.config, 'manuscript_type', 'fiction')
+        
+        if manuscript_type in ['academic', 'technical']:
+            self.fastformat_options = get_academic_options()
+        else:
+            self.fastformat_options = get_ptbr_options()
+        
+        # Permite configurações customizadas
+        self.use_fastformat = getattr(self.config, 'use_fastformat', True)
     
     def format_document(self, enhanced_content: Dict, elements: Dict, corrections: List[Dict]) -> Dict:
         """
@@ -36,6 +52,11 @@ class DocumentFormatter:
         # Aplica correções da revisão
         content = self._apply_corrections(content, corrections)
         
+        # Aplica FastFormat para formatação tipográfica avançada
+        if self.use_fastformat:
+            print_info("Aplicando FastFormat (formatação tipográfica avançada)...")
+            content = apply_fastformat(content, self.fastformat_options)
+        
         # Formatação de títulos e subtítulos
         content = self._format_headings(content)
         
@@ -51,8 +72,9 @@ class DocumentFormatter:
         # Formatação de código
         content = self._format_code_blocks(content)
         
-        # Padronização de pontuação
-        content = self._standardize_punctuation(content)
+        # Padronização de pontuação (se FastFormat não foi usado)
+        if not self.use_fastformat:
+            content = self._standardize_punctuation(content)
         
         # Padronização de espaçamento
         content = self._standardize_spacing(content)
