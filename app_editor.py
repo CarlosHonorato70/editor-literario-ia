@@ -21,7 +21,8 @@ def inicializar_estado():
         "text_content": "", "file_processed": False,
         "book_title": "Sem Título", "author_name": "Autor Desconhecido", "contact_info": "seuemail@exemplo.com",
         "sugestoes_estilo": None, "api_key_valida": False,
-        "use_fastformat": True  # Enable FastFormat by default
+        "use_fastformat": True,  # Enable FastFormat by default
+        "pending_text_update": None  # For handling text updates from FastFormat
     }
     for key, value in chaves_estado.items():
         if key not in st.session_state:
@@ -149,6 +150,11 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 with tab1:
+    # Handle pending text update from FastFormat
+    if st.session_state.get('pending_text_update'):
+        st.session_state.text_content = st.session_state['pending_text_update']
+        st.session_state['pending_text_update'] = None
+    
     st.subheader("Cole ou Faça o Upload do seu Manuscrito")
     st.file_uploader(
         "Formatos: .txt, .docx",
@@ -262,7 +268,7 @@ with tab2:
             col_action1, col_action2 = st.columns(2)
             with col_action1:
                 if st.button("✅ Aplicar ao Texto", type="primary", use_container_width=True):
-                    st.session_state.text_content = st.session_state['fastformat_preview']
+                    st.session_state['pending_text_update'] = st.session_state['fastformat_preview']
                     del st.session_state['fastformat_preview']
                     st.success("✅ Formatação aplicada ao texto principal!")
                     st.rerun()
