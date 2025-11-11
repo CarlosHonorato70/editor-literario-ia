@@ -359,7 +359,9 @@ def processar_manuscrito_completo(input_file, metadata: ManuscriptMetadata, conf
                     'publisher_name': metadata.publisher
                 }
                 isbn_generator = ISBNCIPGenerator(config_dict)
-                isbn_data = isbn_generator.generate_isbn_13()
+                
+                # generate_isbn() returns a string, not a dict
+                isbn_str = isbn_generator.generate_isbn(book_id=f"{metadata.title}_{metadata.author}")
                 
                 # Prepara metadados para CIP
                 cip_metadata = {
@@ -370,18 +372,21 @@ def processar_manuscrito_completo(input_file, metadata: ManuscriptMetadata, conf
                     'publisher': metadata.publisher,
                     'year': metadata.year,
                     'pages': metadata.page_count,
-                    'isbn': isbn_data['isbn'],
+                    'isbn': isbn_str,
                     'subjects': [metadata.genre],
                     'cdd': '800'  # Literatura
                 }
                 cip_data = isbn_generator.generate_cip(cip_metadata)
                 
-                resultados['isbn'] = isbn_data
+                resultados['isbn'] = {
+                    'isbn': isbn_str,
+                    'isbn_formatted': isbn_str
+                }
                 resultados['cip'] = cip_data
-                st.session_state.isbn_generated = isbn_data['isbn']
+                st.session_state.isbn_generated = isbn_str
                 st.session_state.cip_generated = cip_data
                 
-                st.success(f"✅ ISBN gerado: {isbn_data['isbn']}")
+                st.success(f"✅ ISBN gerado: {isbn_str}")
             except Exception as e:
                 st.error(f"❌ Erro ao gerar ISBN/CIP: {e}")
                 resultados['isbn'] = None
