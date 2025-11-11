@@ -792,7 +792,7 @@ def exibir_workflow_completo():
                     
                     with st.expander("📋 Ver Ficha Catalográfica (CIP)"):
                         if resultados.get('cip'):
-                            st.code(resultados['cip'].get('cip_data', 'N/A'), language='text')
+                            st.code(resultados['cip'], language='text')
                 
                 # Download dos resultados
                 if st.session_state.workflow_dir:
