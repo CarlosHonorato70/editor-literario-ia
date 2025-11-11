@@ -219,11 +219,6 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 with tab1:
-    # Handle pending text update from FastFormat
-    if st.session_state.get('pending_text_update'):
-        st.session_state.text_content = st.session_state['pending_text_update']
-        st.session_state['pending_text_update'] = None
-    
     st.subheader("Cole ou Faça o Upload do seu Manuscrito")
     st.file_uploader(
         "Formatos: .txt, .docx",
@@ -233,11 +228,25 @@ with tab1:
     )
 
     st.subheader("Editor Principal")
-    st.text_area(
+    
+    # Determine the value for text_area
+    # Priority: pending_text_update > text_content
+    text_value = st.session_state.text_content
+    if st.session_state.get('pending_text_update'):
+        text_value = st.session_state['pending_text_update']
+        st.session_state['pending_text_update'] = None
+    
+    # Use text_area without key, store value manually
+    new_text = st.text_area(
         "Seu texto aparecerá aqui após o upload. Você também pode colar diretamente.",
+        value=text_value,
         height=600,
-        key="text_content"
+        key="text_content_input"
     )
+    
+    # Update session state only if text changed
+    if new_text != st.session_state.text_content:
+        st.session_state.text_content = new_text
     
     # Sync button to rich editor
     if RICH_EDITOR_AVAILABLE:
@@ -346,10 +355,12 @@ with tab2:
         with col1:
             if st.button("💾 Salvar para Texto Principal", type="primary", use_container_width=True):
                 if st.session_state.rich_editor_content:
-                    # Convert HTML to plain text and save to main text content
+                    # Convert HTML to plain text and save to pending update
                     plain_text = html_to_plain_text(st.session_state.rich_editor_content)
+                    st.session_state.pending_text_update = plain_text
                     st.session_state.text_content = plain_text
                     st.success("✅ Texto salvo no Editor Principal!")
+                    st.rerun()
                 else:
                     st.warning("⚠️ O editor está vazio.")
         
