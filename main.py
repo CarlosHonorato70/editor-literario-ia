@@ -80,11 +80,11 @@ class ManuscriptPublisher:
             
             # Salva análise
             analysis_path = output_dir / "01_Analise_Estrutura.md"
-            self.analyzer.save_analysis(analysis_result, str(analysis_path))
+            self.analyzer.save_report(analysis_result, analysis_path)
             
             tracker.end_phase("ANALYSIS", {
-                "word_count": analysis_result["metadata"]["word_count"],
-                "page_count": analysis_result["metadata"]["page_count"],
+                "word_count": analysis_result["word_count"],
+                "page_count": analysis_result["page_count"],
                 "chapter_count": len(analysis_result["structure"]["chapters"]),
                 "quality_score": analysis_result["quality"]["overall_score"]
             })
@@ -227,16 +227,17 @@ class ManuscriptPublisher:
                 "action": "Revisão abrangente necessária"
             })
         
-        # Verifica legibilidade
-        if quality["readability_score"] < 0.6:
+        # Verifica legibilidade (baseado em palavras por sentença)
+        if quality.get("avg_words_per_sentence", 0) > 25:
             opportunities["medium_priority"].append({
                 "category": "readability",
-                "description": "Legibilidade pode ser melhorada",
+                "description": "Legibilidade pode ser melhorada (sentenças muito longas)",
                 "action": "Simplificar sentenças e parágrafos"
             })
         
         # Verifica consistência
-        if quality["consistency_score"] < 0.7:
+        term_consistency = quality.get("term_consistency", {})
+        if term_consistency.get("score", 1.0) < 0.7:
             opportunities["medium_priority"].append({
                 "category": "consistency",
                 "description": "Inconsistências terminológicas",
@@ -290,18 +291,24 @@ class ManuscriptPublisher:
         print("="*60)
         
         summary = tracker.get_summary()
+        phases = summary.get('phases', {})
         
         print(f"\n📊 Estatísticas:")
-        print(f"  • Palavras processadas: {summary['ANALYSIS']['word_count']:,}")
-        print(f"  • Páginas estimadas: {summary['ANALYSIS']['page_count']}")
-        print(f"  • Capítulos: {summary['ANALYSIS']['chapter_count']}")
-        print(f"  • Qualidade inicial: {summary['ANALYSIS']['quality_score']:.1f}/1.0")
-        print(f"  • Avaliação final: {summary['REVIEW']['overall_rating']}/10.0")
+        if 'ANALYSIS' in phases and 'metrics' in phases['ANALYSIS']:
+            metrics = phases['ANALYSIS']['metrics']
+            print(f"  • Palavras processadas: {metrics.get('word_count', 0):,}")
+            print(f"  • Páginas estimadas: {metrics.get('page_count', 0)}")
+            print(f"  • Capítulos: {metrics.get('chapter_count', 0)}")
+            print(f"  • Qualidade inicial: {metrics.get('quality_score', 0):.1f}/1.0")
         
-        print(f"\n📁 Arquivos gerados: {len(export_result['files'])}")
+        if 'REVIEW' in phases and 'metrics' in phases['REVIEW']:
+            review_metrics = phases['REVIEW']['metrics']
+            print(f"  • Avaliação final: {review_metrics.get('overall_rating', 0)}/10.0")
+        
+        print(f"\n📁 Arquivos gerados: {len(export_result.get('files', []))}")
         print(f"📂 Localização: {output_dir}/")
         
-        print(f"\n⏱️  Tempo total: {tracker.get_total_time():.1f}s")
+        print(f"\n⏱️  Tempo total: {summary.get('total_time', 0):.1f}s")
         
         print("\n" + "="*60)
 

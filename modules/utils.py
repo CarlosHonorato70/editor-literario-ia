@@ -226,7 +226,7 @@ def sanitize_filename(filename: str) -> str:
     Returns:
         Nome do arquivo sanitizado
     """
-    invalid_chars = '<>:"/\\|?*'
+    invalid_chars = r'<>:"/\|?*'
     for char in invalid_chars:
         filename = filename.replace(char, '_')
     return filename
@@ -273,11 +273,31 @@ def write_file_safe(file_path: str, content: str, encoding: str = 'utf-8') -> bo
 class ProgressTracker:
     """Classe para rastrear progresso de operações longas."""
     
-    def __init__(self, total: int, description: str = "Processando"):
+    def __init__(self, total: int = 7, description: str = "Processando"):
         self.total = total
         self.current = 0
         self.description = description
         self.start_time = time.time()
+        self.phases = {}
+        self.current_phase = None
+    
+    def start_phase(self, phase_name: str):
+        """Inicia uma nova fase."""
+        self.current_phase = phase_name
+        self.phases[phase_name] = {
+            'start_time': time.time(),
+            'status': 'in_progress'
+        }
+    
+    def end_phase(self, phase_name: str, metrics: dict = None):
+        """Finaliza uma fase."""
+        if phase_name in self.phases:
+            self.phases[phase_name]['end_time'] = time.time()
+            self.phases[phase_name]['status'] = 'completed'
+            if metrics:
+                self.phases[phase_name]['metrics'] = metrics
+        self.current += 1
+        self._print_progress()
     
     def update(self, increment: int = 1):
         """Atualiza progresso."""
@@ -306,3 +326,12 @@ class ProgressTracker:
         self._print_progress()
         duration = time.time() - self.start_time
         print_success(f"{self.description} concluído em {duration:.2f}s")
+    
+    def get_summary(self) -> dict:
+        """Retorna sumário do progresso."""
+        return {
+            'total_time': time.time() - self.start_time,
+            'phases': self.phases,
+            'completed': self.current,
+            'total': self.total
+        }
