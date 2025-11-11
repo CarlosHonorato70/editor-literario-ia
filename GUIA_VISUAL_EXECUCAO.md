@@ -19,7 +19,51 @@ cd C:\projetos\editor-literario-ia         # Windows
 cd ~/projetos/editor-literario-ia          # Mac/Linux
 ```
 
-## Passo 3: Verificar Dependências
+## Passo 3: Verificar Dependências ⭐ **IMPORTANTE**
+
+### Opção 1: Usar Script de Diagnóstico (Recomendado)
+
+```bash
+python check_dependencies.py
+```
+
+**O que você verá:**
+```
+============================================================
+  Diagnóstico de Dependências - Adapta ONE
+============================================================
+
+✅ streamlit                 - Framework da interface
+✅ streamlit_quill           - Editor Avançado (Word-like)
+✅ docx                      - Processamento de documentos DOCX
+...
+
+============================================================
+✅ Todas as dependências estão instaladas!
+
+🚀 Você está pronto para usar o Adapta ONE!
+
+Execute: streamlit run app_editor.py
+
+============================================================
+```
+
+**Se alguma dependência estiver faltando:**
+```
+❌ streamlit_quill           - Editor Avançado (Word-like) [FALTANDO]
+
+⚠️  ATENÇÃO: Dependências críticas faltando!
+
+Para instalar as dependências críticas:
+
+  pip install streamlit-quill
+
+Ou reinstale todas as dependências:
+
+  pip install -r requirements.txt
+```
+
+### Opção 2: Verificar Python
 
 ```bash
 # Ver se o Python está instalado:
@@ -211,6 +255,43 @@ streamlit run app_editor.py --server.port 8502
 ```
 
 ## Solução de Problemas Visuais
+
+### ⚠️ Editor Avançado não aparece / mostra erro
+
+**O que você vê:**
+```
+┌────────────────────────────────────────┐
+│ ⚠️ Editor Avançado não disponível      │
+│                                        │
+│ O módulo streamlit-quill não está     │
+│ instalado.                             │
+│                                        │
+│ Para ativar o Editor Avançado:         │
+│ 1. Pare o aplicativo (Ctrl+C)         │
+│ 2. Execute: pip install streamlit-quill│
+│ 3. Reinicie: streamlit run app_editor.py│
+└────────────────────────────────────────┘
+```
+
+**Solução 1 - Executar diagnóstico:**
+```bash
+python check_dependencies.py
+```
+
+**Solução 2 - Instalar dependência específica:**
+```bash
+pip install streamlit-quill
+```
+
+**Solução 3 - Reinstalar tudo:**
+```bash
+pip install -r requirements.txt
+```
+
+Depois reinicie o app:
+```bash
+streamlit run app_editor.py
+```
 
 ### ❌ Erro: "streamlit: command not found"
 

@@ -2,6 +2,20 @@
 
 ## 🚀 Guia Rápido de Instalação e Uso
 
+### Passo 0: Verificar Dependências (Recomendado)
+
+Antes de começar, verifique se todas as dependências estão instaladas:
+
+```bash
+# Execute o script de diagnóstico
+python check_dependencies.py
+```
+
+O script mostrará:
+- ✅ Dependências instaladas
+- ❌ Dependências faltando
+- Comandos para instalar o que falta
+
 ### Passo 1: Instalar Dependências
 
 Primeiro, certifique-se de que todas as dependências estão instaladas:
@@ -13,8 +27,10 @@ pip install -r requirements.txt
 
 Isso irá instalar:
 - `streamlit` - Framework da interface
-- `streamlit-quill` - Editor de texto rico (NOVO)
+- `streamlit-quill` - Editor de texto rico (NOVO) ⭐ **NECESSÁRIO PARA O EDITOR AVANÇADO**
 - Todas as outras dependências necessárias
+
+**⚠️ Importante:** Se o Editor Avançado (Word-like) não aparecer, é porque `streamlit-quill` não está instalado. Execute o comando acima para instalar.
 
 ### Passo 2: Executar o Aplicativo
 
@@ -149,6 +165,34 @@ Quando o app abrir, você verá:
 ```
 
 ## 🔧 Solução de Problemas
+
+### ⚠️ Editor Avançado não aparece
+
+**Sintoma:** A aba "Editor Avançado (Word-like)" mostra mensagem de erro ou não funciona.
+
+**Causa:** O módulo `streamlit-quill` não está instalado.
+
+**Solução:**
+
+1. Execute o diagnóstico:
+```bash
+python check_dependencies.py
+```
+
+2. Instale a dependência:
+```bash
+pip install streamlit-quill
+```
+
+3. OU reinstale todas as dependências:
+```bash
+pip install -r requirements.txt
+```
+
+4. Reinicie o aplicativo:
+```bash
+streamlit run app_editor.py
+```
 
 ### Erro: "streamlit: command not found"
 ```bash
