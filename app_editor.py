@@ -358,7 +358,6 @@ with tab2:
                     # Convert HTML to plain text and save to pending update
                     plain_text = html_to_plain_text(st.session_state.rich_editor_content)
                     st.session_state.pending_text_update = plain_text
-                    st.session_state.text_content = plain_text
                     st.success("✅ Texto salvo no Editor Principal!")
                     st.rerun()
                 else:
