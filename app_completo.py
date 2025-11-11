@@ -305,18 +305,28 @@ def processar_manuscrito_completo(input_file, metadata: ManuscriptMetadata, conf
         with st.status("✨ Fase 2: Aprimoramento de Conteúdo", expanded=True):
             st.write("Aplicando melhorias de conteúdo...")
             try:
-                enhanced = enhancer.enhance(analysis['content'], analysis)
+                # ContentEnhancer.enhance() requires: content, opportunities, metadata
+                enhanced = enhancer.enhance(
+                    analysis['content'], 
+                    analysis.get('content_analysis', {}),
+                    analysis.get('metadata', {})
+                )
                 resultados['enhanced'] = enhanced
                 st.success("✅ Conteúdo aprimorado com sucesso")
             except Exception as e:
                 st.error(f"❌ Erro no aprimoramento: {e}")
-                resultados['enhanced'] = analysis['content']
+                resultados['enhanced'] = {'content': analysis['content'], 'changes': []}
         
         # Fase 3: Formatação
         with st.status("📝 Fase 3: Formatação Profissional", expanded=True):
             st.write("Aplicando formatação tipográfica...")
             try:
-                formatted = formatter.format(resultados['enhanced'])
+                # DocumentFormatter.format_document() requires: enhanced_content, elements, corrections
+                formatted = formatter.format_document(
+                    resultados['enhanced'],
+                    {},  # elements (empty for now)
+                    []   # corrections (empty for now)
+                )
                 resultados['formatted'] = formatted
                 st.success("✅ Formatação aplicada com sucesso")
             except Exception as e:
@@ -327,7 +337,12 @@ def processar_manuscrito_completo(input_file, metadata: ManuscriptMetadata, conf
         with st.status("🔍 Fase 4: Revisão Editorial", expanded=True):
             st.write("Realizando revisão editorial...")
             try:
-                review = reviewer.review(resultados['formatted'], analysis)
+                # EditorialReviewer.review() requires: enhanced_content, elements, metadata
+                review = reviewer.review(
+                    resultados['formatted'] if isinstance(resultados['formatted'], dict) else {'content': resultados['formatted']},
+                    {},  # elements
+                    analysis.get('metadata', {})
+                )
                 resultados['review'] = review
                 st.success(f"✅ Revisão concluída - Score: {review.get('overall_rating', 'N/A')}/10")
             except Exception as e:
@@ -338,9 +353,28 @@ def processar_manuscrito_completo(input_file, metadata: ManuscriptMetadata, conf
         with st.status("📖 Fase 5: Geração de ISBN e CIP", expanded=True):
             st.write("Gerando ISBN e ficha catalográfica...")
             try:
-                isbn_generator = ISBNCIPGenerator(config)
+                # ISBNCIPGenerator expects a dict config, not Config object
+                config_dict = {
+                    'publisher_prefix': '85',
+                    'publisher_name': metadata.publisher
+                }
+                isbn_generator = ISBNCIPGenerator(config_dict)
                 isbn_data = isbn_generator.generate_isbn_13()
-                cip_data = isbn_generator.generate_cip(metadata, isbn_data['isbn'])
+                
+                # Prepara metadados para CIP
+                cip_metadata = {
+                    'author': metadata.author,
+                    'title': metadata.title,
+                    'edition': metadata.edition,
+                    'city': 'São Paulo',  # Pode ser configurável
+                    'publisher': metadata.publisher,
+                    'year': metadata.year,
+                    'pages': metadata.page_count,
+                    'isbn': isbn_data['isbn'],
+                    'subjects': [metadata.genre],
+                    'cdd': '800'  # Literatura
+                }
+                cip_data = isbn_generator.generate_cip(cip_metadata)
                 
                 resultados['isbn'] = isbn_data
                 resultados['cip'] = cip_data
