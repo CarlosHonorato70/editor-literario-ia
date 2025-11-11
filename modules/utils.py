@@ -226,7 +226,7 @@ def sanitize_filename(filename: str) -> str:
     Returns:
         Nome do arquivo sanitizado
     """
-    invalid_chars = '<>:"/\\|?*'
+    invalid_chars = r'<>:"/\|?*'
     for char in invalid_chars:
         filename = filename.replace(char, '_')
     return filename

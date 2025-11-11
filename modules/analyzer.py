@@ -71,7 +71,15 @@ class ManuscriptAnalyzer:
         elif file_ext == '.pdf':
             return self._extract_from_pdf(file_path)
         elif file_ext == '.txt':
-            with open(file_path, 'r', encoding='utf-8') as f:
+            # Try UTF-8 first, then UTF-16 (for Windows PowerShell files)
+            for encoding in ['utf-8', 'utf-16-le', 'utf-16', 'latin-1']:
+                try:
+                    with open(file_path, 'r', encoding=encoding) as f:
+                        return f.read()
+                except UnicodeDecodeError:
+                    continue
+            # If all encodings fail, try with error handling
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                 return f.read()
         else:
             raise ValueError(f"Formato de arquivo não suportado: {file_ext}")
