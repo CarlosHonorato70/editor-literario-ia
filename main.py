@@ -350,7 +350,7 @@ Exemplos de uso:
     args = parser.parse_args()
     
     # Configura logging
-    log_level = logging.DEBUG if args.verbose else logging.INFO
+    log_level = "DEBUG" if args.verbose else "INFO"
     setup_logging(log_level)
     
     # Modo interativo
