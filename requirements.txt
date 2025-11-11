@@ -5,6 +5,7 @@ streamlit>=1.25.0
 
 # Processamento de Documentos
 python-docx>=0.8.11
+PyPDF2>=3.0.0
 
 # Configuração
 pyyaml>=6.0  # Para arquivos de configuração YAML
@@ -12,6 +13,15 @@ pyyaml>=6.0  # Para arquivos de configuração YAML
 # IA e Processamento de Linguagem Natural (PLN)
 openai>=1.0.0
 language-tool-python>=2.7.0  # Para gramática e ortografia
+
+# Design e Produção Editorial
+Pillow>=10.0.0  # Processamento de imagens
+markdown>=3.4.0  # Conversão de Markdown
+Jinja2>=3.1.0  # Templates
+WeasyPrint>=60.0  # Geração de PDF profissional
+python-barcode>=0.15.0  # Geração de códigos de barras (ISBN)
+qrcode[pil]>=7.4.0  # Geração de QR codes
+reportlab>=4.0.0  # Criação avançada de PDFs
 
 # Nota: FastFormat está incluído como módulo local (fastformat.py)
 # não requer instalação via pip
