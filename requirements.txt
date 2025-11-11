@@ -2,6 +2,7 @@
 
 # Framework da Interface
 streamlit>=1.25.0
+streamlit-quill>=0.0.3  # Rich text editor with toolbar
 
 # Processamento de Documentos
 python-docx>=0.8.11

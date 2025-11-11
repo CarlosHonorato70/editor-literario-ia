@@ -9,6 +9,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from openai import OpenAI
+from streamlit_quill import st_quill
 
 # Import FastFormat for advanced text formatting
 from modules.fastformat_utils import apply_fastformat, get_ptbr_options
@@ -22,7 +23,9 @@ def inicializar_estado():
         "book_title": "Sem Título", "author_name": "Autor Desconhecido", "contact_info": "seuemail@exemplo.com",
         "sugestoes_estilo": None, "api_key_valida": False,
         "use_fastformat": True,  # Enable FastFormat by default
-        "pending_text_update": None  # For handling text updates from FastFormat
+        "pending_text_update": None,  # For handling text updates from FastFormat
+        "rich_editor_content": None,  # Content from rich text editor
+        "use_rich_editor": False  # Toggle for rich editor mode
     }
     for key, value in chaves_estado.items():
         if key not in st.session_state:
@@ -43,6 +46,48 @@ def carregar_ferramenta_gramatical():
 def aplicar_correcoes_automaticas(texto: str, ferramenta) -> str:
     if not ferramenta: return texto
     return ferramenta.correct(texto)
+
+def html_to_plain_text(html_content: str) -> str:
+    """Convert HTML from rich editor to plain text for processing."""
+    if not html_content:
+        return ""
+    
+    # Remove HTML tags but preserve line breaks
+    import html
+    
+    # Convert <p>, <div>, <br> to newlines
+    text = html_content.replace('<p>', '\n').replace('</p>', '\n')
+    text = text.replace('<div>', '\n').replace('</div>', '\n')
+    text = text.replace('<br>', '\n').replace('<br/>', '\n').replace('<br />', '\n')
+    
+    # Remove all other HTML tags
+    text = re.sub(r'<[^>]+>', '', text)
+    
+    # Decode HTML entities
+    text = html.unescape(text)
+    
+    # Clean up excessive newlines
+    text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
+    
+    return text.strip()
+
+def plain_text_to_html(plain_text: str) -> str:
+    """Convert plain text to simple HTML for rich editor."""
+    if not plain_text:
+        return ""
+    
+    # Split by paragraphs
+    paragraphs = plain_text.split('\n\n')
+    
+    # Wrap each paragraph in <p> tags
+    html_paragraphs = []
+    for para in paragraphs:
+        if para.strip():
+            # Replace single newlines with <br>
+            para_html = para.replace('\n', '<br>')
+            html_paragraphs.append(f'<p>{para_html}</p>')
+    
+    return '\n'.join(html_paragraphs)
 
 def gerar_sugestoes_estilo_ia(texto: str, client: OpenAI):
     prompt = f"Analise o texto como um editor sênior. Forneça 3-5 sugestões concisas para melhorar estilo, clareza e impacto. Comece cada uma com 'Sugestão:'."
@@ -142,8 +187,9 @@ with st.sidebar:
             st.error("API Key inválida."); st.session_state.api_key_valida = False
 
 # --- ABAS DE FLUXO DE TRABALHO ---
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "1. Escrever & Editar", 
+    "✍️ Editor Avançado (Word-like)",
     "2. FastFormat (Formatação)", 
     "3. Sugestões de Estilo (IA)", 
     "4. Finalizar & Baixar"
@@ -169,8 +215,115 @@ with tab1:
         height=600,
         key="text_content"
     )
+    
+    # Sync button to rich editor
+    if st.button("📤 Enviar para Editor Avançado", help="Carrega o texto no Editor Avançado (Word-like) para edição com formatação rica"):
+        if st.session_state.text_content:
+            st.session_state.rich_editor_content = plain_text_to_html(st.session_state.text_content)
+            st.session_state.use_rich_editor = True
+            st.success("✅ Texto carregado no Editor Avançado! Vá para a aba 'Editor Avançado (Word-like)' para editar.")
+        else:
+            st.warning("⚠️ Adicione texto antes de enviar para o Editor Avançado.")
 
 with tab2:
+    st.header("✍️ Editor Avançado - Interface estilo Word")
+    
+    st.markdown("""
+    ### 📝 Editor de Texto Rico com Barra de Ferramentas
+    
+    Este editor oferece uma experiência similar ao Microsoft Word com:
+    
+    - **Formatação de texto:** Negrito, itálico, sublinhado, tachado
+    - **Títulos:** H1, H2, H3 (títulos de diferentes níveis)
+    - **Listas:** Com marcadores ou numeradas
+    - **Alinhamento:** Esquerda, centro, direita, justificado
+    - **Links e imagens:** Adicione links e imagens ao texto
+    - **Cores:** Personalize cores de texto e fundo
+    - **Desfazer/Refazer:** Histórico completo de edição
+    
+    **💡 Dica:** Use o editor para intervir manualmente no processo de edição quando necessário!
+    """)
+    
+    st.divider()
+    
+    # Check if content exists
+    if not st.session_state.get('rich_editor_content') and not st.session_state.text_content:
+        st.info("📝 Escreva ou carregue um texto na primeira aba, depois use o botão '📤 Enviar para Editor Avançado'.", icon="ℹ️")
+        
+        # Option to start fresh
+        if st.button("✨ Começar novo documento no Editor"):
+            st.session_state.rich_editor_content = "<p>Comece a escrever seu texto aqui...</p>"
+            st.session_state.use_rich_editor = True
+            st.rerun()
+    
+    else:
+        # Initialize rich editor content if not exists
+        if not st.session_state.get('rich_editor_content'):
+            st.session_state.rich_editor_content = plain_text_to_html(st.session_state.text_content)
+        
+        st.subheader("🖊️ Área de Edição")
+        
+        # Rich text editor with full toolbar
+        content = st_quill(
+            value=st.session_state.rich_editor_content,
+            html=True,
+            readonly=False,
+            key='quill_editor',
+            toolbar=[
+                ['bold', 'italic', 'underline', 'strike'],
+                ['blockquote', 'code-block'],
+                [{'header': 1}, {'header': 2}],
+                [{'list': 'ordered'}, {'list': 'bullet'}],
+                [{'script': 'sub'}, {'script': 'super'}],
+                [{'indent': '-1'}, {'indent': '+1'}],
+                [{'direction': 'rtl'}],
+                [{'size': ['small', False, 'large', 'huge']}],
+                [{'header': [1, 2, 3, 4, 5, 6, False]}],
+                [{'color': []}, {'background': []}],
+                [{'font': []}],
+                [{'align': []}],
+                ['clean'],
+                ['link', 'image']
+            ]
+        )
+        
+        # Update session state with editor content
+        if content:
+            st.session_state.rich_editor_content = content
+        
+        st.divider()
+        
+        # Action buttons
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("💾 Salvar para Texto Principal", type="primary", use_container_width=True):
+                if st.session_state.rich_editor_content:
+                    # Convert HTML to plain text and save to main text content
+                    plain_text = html_to_plain_text(st.session_state.rich_editor_content)
+                    st.session_state.text_content = plain_text
+                    st.success("✅ Texto salvo no Editor Principal!")
+                else:
+                    st.warning("⚠️ O editor está vazio.")
+        
+        with col2:
+            if st.button("🔄 Recarregar do Texto Principal", use_container_width=True):
+                st.session_state.rich_editor_content = plain_text_to_html(st.session_state.text_content)
+                st.success("✅ Texto recarregado do Editor Principal!")
+                st.rerun()
+        
+        with col3:
+            if st.button("🗑️ Limpar Editor", use_container_width=True):
+                st.session_state.rich_editor_content = "<p></p>"
+                st.rerun()
+        
+        # Show word count
+        if st.session_state.rich_editor_content:
+            plain_for_count = html_to_plain_text(st.session_state.rich_editor_content)
+            word_count = len(plain_for_count.split())
+            st.info(f"📊 **Contagem de palavras:** {word_count:,} palavras")
+
+with tab3:
     st.header("✨ FastFormat - Formatação Tipográfica Profissional")
     
     if not st.session_state.text_content:
@@ -278,7 +431,7 @@ with tab2:
                     del st.session_state['fastformat_preview']
                     st.rerun()
 
-with tab3:
+with tab4:
     st.header("Assistente de Escrita com IA (Opcional)")
     if not st.session_state.text_content:
         st.info("Escreva ou carregue um texto na primeira aba para começar.")
@@ -295,7 +448,7 @@ with tab3:
                 # ★★★ A CORREÇÃO FINAL ESTÁ AQUI ★★★
                 st.info(sugestao, icon="💡")
 
-with tab4:
+with tab5:
     st.header("Finalize e Exporte seu Manuscrito Profissional")
     if not st.session_state.text_content:
         st.warning("Não há texto para finalizar. Escreva ou carregue seu manuscrito na primeira aba.")
