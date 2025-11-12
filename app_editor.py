@@ -235,6 +235,8 @@ with tab1:
         st.session_state.text_content = st.session_state.uploaded_text
         st.session_state.uploaded_text = None
         st.success("✅ Arquivo carregado com sucesso!")
+        # Force a rerun to update the widget with the new content
+        st.rerun()
     
     # Determine the value for text_area
     # Priority: pending_text_update > text_content
