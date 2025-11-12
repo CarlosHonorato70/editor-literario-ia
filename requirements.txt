@@ -11,6 +11,10 @@ PyPDF2>=3.0.0
 # Configuração
 pyyaml>=6.0  # Para arquivos de configuração YAML
 
+# Editores Adicionais
+streamlit-ace>=0.1.1  # Code editor with syntax highlighting
+beautifulsoup4>=4.12.0  # HTML parsing for editor sync
+
 # IA e Processamento de Linguagem Natural (PLN)
 openai>=1.0.0
 language-tool-python>=2.7.0  # Para gramática e ortografia
