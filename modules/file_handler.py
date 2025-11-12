@@ -7,11 +7,11 @@ com tratamento de erros robusto e feedback claro.
 
 import io
 from typing import Optional, Tuple
-from docx import Document
-try:
-    from PyPDF2 import PdfReader
-except ImportError:
-    PdfReader = None
+
+# Lazy imports to avoid loading heavy dependencies at module import time
+# This prevents issues on systems where dependencies aren't fully installed
+_docx_available = None
+_pypdf2_available = None
 
 
 class FileHandler:
@@ -55,7 +55,16 @@ class FileHandler:
             
         Raises:
             ValueError: Se houver erro na leitura do documento
+            ImportError: Se python-docx não estiver instalado
         """
+        try:
+            from docx import Document
+        except ImportError:
+            raise ImportError(
+                "python-docx não está instalado. "
+                "Instale com: pip install python-docx"
+            )
+        
         try:
             doc = Document(io.BytesIO(file_content))
             paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
@@ -79,7 +88,9 @@ class FileHandler:
             ValueError: Se houver erro na leitura do PDF
             ImportError: Se PyPDF2 não estiver instalado
         """
-        if PdfReader is None:
+        try:
+            from PyPDF2 import PdfReader
+        except ImportError:
             raise ImportError(
                 "PyPDF2 não está instalado. "
                 "Instale com: pip install PyPDF2"
@@ -100,9 +111,9 @@ class FileHandler:
                 raise ValueError("Não foi possível extrair texto do PDF. O arquivo pode estar vazio ou protegido.")
             
             return text
+        except ImportError:
+            raise
         except Exception as e:
-            if "PyPDF2" in str(e):
-                raise ImportError(f"Erro ao importar PyPDF2: {str(e)}")
             raise ValueError(f"Erro ao ler arquivo PDF: {str(e)}")
     
     @staticmethod
