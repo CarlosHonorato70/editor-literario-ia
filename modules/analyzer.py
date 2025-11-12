@@ -480,3 +480,69 @@ class ManuscriptAnalyzer:
         
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write('\n'.join(lines))
+
+
+# Module-level convenience function for direct import
+def analyze_manuscript(text: str) -> Dict:
+    """
+    Analisa um manuscrito e retorna métricas básicas.
+    
+    Args:
+        text: Texto do manuscrito para análise
+        
+    Returns:
+        Dicionário com métricas e análise do texto
+    """
+    if not text or not text.strip():
+        return {
+            "word_count": 0,
+            "character_count": 0,
+            "paragraph_count": 0,
+            "sentence_count": 0,
+            "readability": "N/A",
+            "complexity": "N/A",
+            "analysis": "Texto vazio"
+        }
+    
+    # Contagens básicas
+    words = text.split()
+    word_count = len(words)
+    character_count = len(text)
+    paragraphs = [p for p in text.split('\n\n') if p.strip()]
+    paragraph_count = len(paragraphs)
+    
+    # Contar sentenças (aproximado)
+    sentence_endings = text.count('.') + text.count('!') + text.count('?')
+    sentence_count = max(1, sentence_endings)
+    
+    # Calcular média de palavras por sentença
+    avg_words_per_sentence = word_count / sentence_count if sentence_count > 0 else 0
+    
+    # Determinar legibilidade (baseado em palavras por sentença)
+    if avg_words_per_sentence < 15:
+        readability = "Fácil"
+    elif avg_words_per_sentence < 20:
+        readability = "Médio"
+    else:
+        readability = "Difícil"
+    
+    # Determinar complexidade (baseado em comprimento médio de palavra)
+    avg_word_length = sum(len(w) for w in words) / len(words) if words else 0
+    if avg_word_length < 5:
+        complexity = "Baixa"
+    elif avg_word_length < 6.5:
+        complexity = "Média"
+    else:
+        complexity = "Alta"
+    
+    return {
+        "word_count": word_count,
+        "character_count": character_count,
+        "paragraph_count": paragraph_count,
+        "sentence_count": sentence_count,
+        "avg_words_per_sentence": round(avg_words_per_sentence, 2),
+        "avg_word_length": round(avg_word_length, 2),
+        "readability": readability,
+        "complexity": complexity,
+        "analysis": f"Manuscrito com {word_count} palavras, {paragraph_count} parágrafos. Legibilidade: {readability}. Complexidade: {complexity}."
+    }
