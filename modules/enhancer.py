@@ -146,3 +146,20 @@ class ContentEnhancer:
             return response.choices[0].message.content.strip()
         except:
             return paragraph
+
+
+# Exportar função standalone para compatibilidade
+def enhance_content(text: str, focus: str = "overall", use_ai: bool = False) -> str:
+    """
+    Função standalone para aprimorar conteúdo.
+    
+    Args:
+        text: Texto a ser aprimorado
+        focus: Foco do aprimoramento (overall, dialogue, description, transitions)
+        use_ai: Se True, usa IA para aprimoramento
+    
+    Returns:
+        Texto aprimorado
+    """
+    enhancer = ContentEnhancer()
+    return enhancer.enhance(text, focus=focus, use_ai=use_ai)
