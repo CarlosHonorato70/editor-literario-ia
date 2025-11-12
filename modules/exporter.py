@@ -464,3 +464,63 @@ class PublicationExporter:
         ]
         
         return '\n'.join(lines)
+
+
+# Standalone function for mega_editor compatibility
+def export_document(content, format_type="txt", metadata=None):
+    """
+    Exporta documento em diferentes formatos.
+    Função standalone para compatibilidade com imports diretos.
+    
+    Args:
+        content: Conteúdo do documento
+        format_type: Formato de exportação ('txt', 'markdown', 'html')
+        metadata: Metadados opcionais do documento
+        
+    Returns:
+        Conteúdo formatado para exportação
+    """
+    if not content:
+        return ""
+    
+    metadata = metadata or {}
+    title = metadata.get('title', 'Documento')
+    author = metadata.get('author', '')
+    
+    if format_type == "txt":
+        return content
+        
+    elif format_type == "markdown":
+        header = f"# {title}\n\n"
+        if author:
+            header += f"**Autor:** {author}\n\n"
+        header += "---\n\n"
+        return header + content
+        
+    elif format_type == "html":
+        html = f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{title}</title>
+</head>
+<body>
+    <h1>{title}</h1>
+"""
+        if author:
+            html += f"    <p><strong>Autor:</strong> {author}</p>\n"
+        
+        html += "    <hr>\n"
+        
+        # Converte parágrafos
+        paragraphs = content.split('\n\n')
+        for para in paragraphs:
+            if para.strip():
+                html += f"    <p>{para.strip()}</p>\n"
+        
+        html += """</body>
+</html>"""
+        return html
+    
+    return content

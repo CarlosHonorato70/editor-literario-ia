@@ -333,3 +333,31 @@ class DocumentFormatter:
         except Exception as e:
             self.logger.error(f"Erro ao converter para DOCX: {e}")
             return False
+
+
+# Standalone function for mega_editor compatibility
+def format_document(content, style="default"):
+    """
+    Formata o documento com estilo específico.
+    Função standalone para compatibilidade com imports diretos.
+    
+    Args:
+        content: Conteúdo do documento
+        style: Estilo de formatação ('default', 'compact', 'spaced', etc.)
+        
+    Returns:
+        Conteúdo formatado
+    """
+    if not content:
+        return content
+    
+    styles = {
+        "default": content,
+        "compact": content.replace('\n\n', '\n'),
+        "spaced": content.replace('\n', '\n\n'),
+        "uppercase": content.upper(),
+        "lowercase": content.lower(),
+        "title": content.title(),
+    }
+    
+    return styles.get(style, content)
