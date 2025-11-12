@@ -361,5 +361,40 @@ def main():
     print(generator.generate_legal_page(metadata))
 
 
+# Standalone wrapper function for easy import
+def generate_isbn_cip(metadata: Dict) -> Dict:
+    """
+    Standalone function to generate ISBN and CIP data.
+    
+    Args:
+        metadata: Dictionary with book metadata (title, author, publisher, etc.)
+        
+    Returns:
+        Dictionary with ISBN, CIP box, and legal page content
+    """
+    generator = ISBNCIPGenerator()
+    
+    # Generate ISBN if not provided
+    if 'isbn' not in metadata or not metadata['isbn']:
+        metadata['isbn'] = generator.generate_isbn(metadata.get('title', 'book'))
+    
+    # Generate CIP and legal page
+    result = {
+        'isbn': metadata['isbn'],
+        'cip_box': generator.generate_cip_box(metadata),
+        'legal_page': generator.generate_legal_page(metadata),
+        'barcode_path': None
+    }
+    
+    # Generate barcode if path provided
+    if 'barcode_output_path' in metadata:
+        result['barcode_path'] = generator.generate_barcode(
+            metadata['isbn'],
+            metadata['barcode_output_path']
+        )
+    
+    return result
+
+
 if __name__ == '__main__':
     main()

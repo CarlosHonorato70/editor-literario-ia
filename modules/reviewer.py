@@ -452,3 +452,47 @@ class EditorialReviewer:
         
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write('\n'.join(lines))
+
+
+# Standalone function for mega_editor compatibility
+def review_text(text, review_type="basic"):
+    """
+    Revisa o texto e retorna análise.
+    Função standalone para compatibilidade com imports diretos.
+    
+    Args:
+        text: Texto para revisar
+        review_type: Tipo de revisão ('basic', 'detailed', 'technical')
+        
+    Returns:
+        Dicionário com resultados da revisão
+    """
+    if not text:
+        return {"status": "empty", "issues": [], "suggestions": []}
+    
+    # Análises básicas
+    word_count = len(text.split())
+    char_count = len(text)
+    line_count = len(text.split('\n'))
+    
+    issues = []
+    suggestions = []
+    
+    # Verifica problemas básicos
+    if word_count < 100:
+        issues.append({"severity": "low", "message": "Texto muito curto"})
+    
+    # Verifica repetições
+    words = text.lower().split()
+    if len(words) != len(set(words)) and len(words) > 10:
+        suggestions.append("Considere variar o vocabulário para evitar repetições")
+    
+    return {
+        "status": "reviewed",
+        "word_count": word_count,
+        "char_count": char_count,
+        "line_count": line_count,
+        "issues": issues,
+        "suggestions": suggestions,
+        "review_type": review_type
+    }
