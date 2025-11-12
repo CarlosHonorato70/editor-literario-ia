@@ -172,14 +172,13 @@ def processar_arquivo_carregado():
             else:
                 doc = Document(io.BytesIO(uploaded_file.read()))
                 text = "\n\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-            st.session_state.text_content = text
+            # Store the uploaded text in a temporary variable
+            st.session_state.uploaded_text = text
             st.session_state.file_processed = True
             st.session_state.sugestoes_estilo = None
-            # Force a rerun to update the text_area widget with the new content
-            st.rerun()
         except Exception as e:
             st.error(f"Ocorreu um erro ao ler o arquivo: {e}")
-            st.session_state.text_content = ""
+            st.session_state.uploaded_text = None
             st.session_state.file_processed = False
 
 # --- INTERFACE DO USUÁRIO ---
@@ -230,6 +229,12 @@ with tab1:
     )
 
     st.subheader("Editor Principal")
+    
+    # Check if there's uploaded text to process
+    if st.session_state.get('uploaded_text') is not None:
+        st.session_state.text_content = st.session_state.uploaded_text
+        st.session_state.uploaded_text = None
+        st.success("✅ Arquivo carregado com sucesso!")
     
     # Determine the value for text_area
     # Priority: pending_text_update > text_content
