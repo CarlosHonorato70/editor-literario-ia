@@ -12,6 +12,7 @@ from openai import OpenAI
 
 # Import FastFormat for advanced text formatting
 from modules.fastformat_utils import apply_fastformat, get_ptbr_options
+from modules.file_handler import extract_text
 
 # --- CONFIGURAÇÃO DA PÁGINA E ESTADO ---
 st.set_page_config(page_title="Adapta ONE - Editor Profissional", page_icon="✒️", layout="wide")
@@ -99,14 +100,19 @@ def processar_arquivo_carregado():
     uploaded_file = st.session_state.file_uploader_key
     if uploaded_file:
         try:
-            if uploaded_file.name.endswith('.txt'):
-                text = io.StringIO(uploaded_file.getvalue().decode("utf-8")).read()
+            # Usa o módulo file_handler para extrair o texto
+            file_content = uploaded_file.getvalue()
+            text, error = extract_text(file_content, uploaded_file.name)
+            
+            if error:
+                st.error(f"❌ {error}")
+                st.session_state.text_content = ""
+                st.session_state.file_processed = False
             else:
-                doc = Document(io.BytesIO(uploaded_file.read()))
-                text = "\n\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-            st.session_state.text_content = text
-            st.session_state.file_processed = True
-            st.session_state.sugestoes_estilo = None
+                st.session_state.text_content = text
+                st.session_state.file_processed = True
+                st.session_state.sugestoes_estilo = None
+                st.success(f"✅ Arquivo '{uploaded_file.name}' carregado com sucesso!")
         except Exception as e:
             st.error(f"Ocorreu um erro ao ler o arquivo: {e}")
             st.session_state.text_content = ""
@@ -157,8 +163,8 @@ with tab1:
     
     st.subheader("Cole ou Faça o Upload do seu Manuscrito")
     st.file_uploader(
-        "Formatos: .txt, .docx",
-        type=["txt", "docx"],
+        "Formatos: .txt, .docx, .pdf",
+        type=["txt", "docx", "pdf"],
         key="file_uploader_key",
         on_change=processar_arquivo_carregado
     )
