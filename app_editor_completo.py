@@ -31,9 +31,8 @@ with tab1:
         st.write("**Recursos:** Negrito, Itálico, Listas, Links, Imagens, Títulos...")
         quill_content = st_quill(
             placeholder="Comece a escrever seu manuscrito...",
-            toolbar=True,
-            key="quill_editor",
-            height=500
+            html=True,
+            key="quill_editor"
         )
         
         if quill_content:
