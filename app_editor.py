@@ -146,6 +146,17 @@ with st.sidebar:
             st.success("API Key válida!")
         except Exception:
             st.error("API Key inválida."); st.session_state.api_key_valida = False
+    
+    # --- DEBUG: Session State Status ---
+    st.divider()
+    with st.expander("🔍 Debug: Status do Sistema", expanded=False):
+        text_len = len(st.session_state.get('text_content', ''))
+        st.write(f"**Texto carregado:** {text_len} caracteres")
+        st.write(f"**Arquivo processado:** {'Sim' if st.session_state.get('file_processed', False) else 'Não'}")
+        if text_len > 0:
+            preview = st.session_state.text_content[:100].replace('\n', ' ')
+            st.write(f"**Prévia:** {preview}...")
+        st.caption("Use este painel para verificar se o texto está salvo no sistema")
 
 # --- ABAS DE FLUXO DE TRABALHO ---
 tab1, tab2, tab3, tab4 = st.tabs([
