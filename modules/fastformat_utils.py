@@ -9,12 +9,32 @@ import sys
 from pathlib import Path
 
 # Import the comprehensive fastformat module
-from fastformat import (
-    FastFormatOptions,
-    apply_fastformat as _apply_fastformat_core,
-    make_unified_diff,
-    get_fastformat_default_options
-)
+try:
+    # Try importing from blackbelt_platform package first
+    from blackbelt_platform.fastformat import (
+        FastFormatOptions,
+        apply_fastformat as _apply_fastformat_core,
+        make_unified_diff,
+        get_fastformat_default_options
+    )
+except ImportError:
+    # Fall back to direct import if running as script
+    from fastformat import (
+        FastFormatOptions,
+        apply_fastformat as _apply_fastformat_core,
+        make_unified_diff,
+        get_fastformat_default_options
+    )
+
+# Export public API
+__all__ = [
+    'FastFormatOptions',
+    'apply_fastformat',
+    'get_default_options',
+    'get_ptbr_options',
+    'get_academic_options',
+    'make_unified_diff',
+]
 
 
 def get_default_options() -> FastFormatOptions:

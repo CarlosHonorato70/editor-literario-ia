@@ -1,0 +1,101 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blackbelt-platform"
+version = "2.0.0"
+description = "Sistema Automatizado de Preparação de Manuscritos para Publicação"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Carlos Honorato", email = "carlos@example.com"}
+]
+maintainers = [
+    {name = "Manus AI", email = "manus@example.com"}
+]
+keywords = [
+    "manuscript",
+    "publishing",
+    "editorial",
+    "book",
+    "typesetting",
+    "IA",
+    "AI",
+    "editor",
+    "literario"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing",
+    "Topic :: Text Processing :: Markup",
+]
+
+dependencies = [
+    "streamlit>=1.25.0",
+    "python-docx>=0.8.11",
+    "PyPDF2>=3.0.0",
+    "pyyaml>=6.0",
+    "openai>=1.0.0",
+    "language-tool-python>=2.7.0",
+    "Pillow>=10.0.0",
+    "markdown>=3.4.0",
+    "Jinja2>=3.1.0",
+    "WeasyPrint>=60.0",
+    "python-barcode>=0.15.0",
+    "qrcode[pil]>=7.4.0",
+    "reportlab>=4.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=22.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/CarlosHonorato70/editor-literario-ia"
+Documentation = "https://github.com/CarlosHonorato70/editor-literario-ia#readme"
+Repository = "https://github.com/CarlosHonorato70/editor-literario-ia.git"
+Issues = "https://github.com/CarlosHonorato70/editor-literario-ia/issues"
+
+[project.scripts]
+manuscript-publisher = "blackbelt_platform.main:main"
+complete-workflow = "blackbelt_platform.complete_workflow:main"
+
+[tool.setuptools]
+packages = ["blackbelt_platform", "modules", "modules.production"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml", "*.yml", "*.md", "*.txt"]
+
+[tool.black]
+line-length = 100
+target-version = ['py311', 'py312']
+include = '\.pyi?$'
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --cov=modules --cov-report=html --cov-report=term"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false

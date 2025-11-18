@@ -2,6 +2,10 @@
 
 **Versão 2.0** | Desenvolvido por Manus AI | Novembro 2025
 
+**Pacote Python**: `@CarlosHonorato70/blackbelt-platform` 🎉 **NOVO**
+
+[![PyPI Package](https://img.shields.io/badge/package-blackbelt--platform-blue)](https://github.com/CarlosHonorato70/editor-literario-ia)
+
 ---
 
 ## 📖 Visão Geral
@@ -66,9 +70,27 @@ python complete_workflow.py manuscrito.pdf \
 
 ### Instalação
 
+#### Método 1: Instalar como Pacote Python (Recomendado) 🎉 **NOVO**
+
+```bash
+# Clone o repositório
+git clone https://github.com/CarlosHonorato70/editor-literario-ia.git
+cd editor-literario-ia
+
+# Instale o pacote
+pip install -e .
+
+# Verifique a instalação
+manuscript-publisher --help
+```
+
+📖 **Guia Completo de Instalação**: [PACKAGE_INSTALL.md](PACKAGE_INSTALL.md)
+
+#### Método 2: Instalação Manual (Desenvolvimento)
+
 ```bash
 # Clone ou baixe o sistema
-cd manuscript_publisher
+cd editor-literario-ia
 
 # Instale dependências
 pip install -r requirements.txt
