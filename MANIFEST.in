@@ -1,0 +1,42 @@
+# Include documentation
+include README.md
+include LICENSE
+include CHANGELOG_FASTFORMAT.md
+include COMO_VER_FASTFORMAT.md
+include DEMONSTRACAO_SUCESSO.txt
+include FASTFORMAT_DOCS.md
+include GUIA_FASTFORMAT_UI.md
+include IMPLEMENTACAO_COMPLETA.md
+include INSTALL.md
+include INTEGRATION_SUMMARY.md
+include INTERFACE_SCREENSHOT_REF.md
+include QUICKSTART.md
+include SYSTEM_OVERVIEW.md
+include WORKFLOW_COMPLETO.md
+
+# Include configuration files
+recursive-include configs *.yaml *.yml
+
+# Include examples
+recursive-include examples *
+
+# Include templates
+recursive-include templates *
+
+# Include module documentation
+recursive-include modules *.md
+
+# Include streamlit config
+recursive-include .streamlit *.toml
+
+# Exclude test files from distribution
+exclude test_*.py
+exclude tox.ini
+exclude .coverage
+
+# Exclude development files
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude *$py.class
+global-exclude *.so
+global-exclude .DS_Store

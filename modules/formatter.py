@@ -9,8 +9,7 @@ import logging
 
 from .config import Config
 from .utils import print_info, ProgressTracker
-from .fastformat_utils import apply_fastformat, get_ptbr_options, get_academic_options
-from fastformat import FastFormatOptions
+from .fastformat_utils import apply_fastformat, get_ptbr_options, get_academic_options, FastFormatOptions
 
 class DocumentFormatter:
     """Formata e padroniza documentos para publicação."""
