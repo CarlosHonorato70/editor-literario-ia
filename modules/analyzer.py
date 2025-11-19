@@ -87,9 +87,10 @@ class ManuscriptAnalyzer:
             from docx import Document
             doc = Document(file_path)
             return '\n\n'.join([para.text for para in doc.paragraphs if para.text.strip()])
-        except ImportError:
-            print_warning("Biblioteca python-docx não instalada. Instale com: pip install python-docx")
-            return ""
+        except ImportError as e:
+            msg = "Biblioteca 'python-docx' não instalada. Instale com: pip install python-docx"
+            self.logger.error(msg)
+            raise RuntimeError(msg) from e
     
     def _extract_from_pdf(self, file_path: str) -> str:
         """Extrai conteúdo de arquivo PDF."""
@@ -101,9 +102,10 @@ class ManuscriptAnalyzer:
                 for page in pdf_reader.pages:
                     text.append(page.extract_text())
                 return '\n\n'.join(text)
-        except ImportError:
-            print_warning("Biblioteca PyPDF2 não instalada. Instale com: pip install PyPDF2")
-            return ""
+        except ImportError as e:
+            msg = "Biblioteca 'PyPDF2' não instalada. Instale com: pip install PyPDF2"
+            self.logger.error(msg)
+            raise RuntimeError(msg) from e
     
     def _analyze_structure(self, content: str) -> Dict:
         """Analisa a estrutura do manuscrito."""

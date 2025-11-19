@@ -61,6 +61,8 @@ class DocumentFormatter:
         content = self._format_headings(content)
         
         # Formatação de listas
+        # A normalização de marcadores é feita pelo FastFormat,
+        # aqui apenas garantimos o espaçamento.
         content = self._format_lists(content)
         
         # Formatação de citações
@@ -127,33 +129,17 @@ class DocumentFormatter:
         return '\n'.join(formatted_lines)
     
     def _format_lists(self, content: str) -> str:
-        """Formata listas."""
-        lines = content.split('\n')
-        formatted_lines = []
-        in_list = False
+        """
+        Formata listas.
         
-        for i, line in enumerate(lines):
-            stripped = line.lstrip()
-            
-            # Detecta item de lista
-            if stripped.startswith(('-', '*', '+')):
-                # Padroniza para usar '-'
-                indent = len(line) - len(stripped)
-                item_text = stripped[1:].lstrip()
-                line = ' ' * indent + '- ' + item_text
-                in_list = True
-            elif stripped.startswith(tuple(f'{n}.' for n in range(10))):
-                # Lista numerada - mantém numeração
-                in_list = True
-            else:
-                # Não é item de lista
-                if in_list and line.strip() == '':
-                    # Linha vazia após lista - mantém
-                    in_list = False
-            
-            formatted_lines.append(line)
+        A normalização de marcadores de lista é delegada ao FastFormat.
+        Aqui, apenas garantimos o espaçamento correto após a formatação.
+        """
+        # Garante linha vazia antes e depois de listas (heurística simples)
+        content = re.sub(r'([^\n])\n([ \t]*[-*+\d]\. )', r'\1\n\n\2', content)
+        content = re.sub(r'([ \t]*[-*+\d]\. [^\n])\n([^\n \t])', r'\1\n\n\2', content)
         
-        return '\n'.join(formatted_lines)
+        return content
     
     def _format_quotes(self, content: str) -> str:
         """Formata citações (blockquotes)."""

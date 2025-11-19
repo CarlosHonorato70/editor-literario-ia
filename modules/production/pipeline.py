@@ -376,8 +376,11 @@ def process_book(manuscript_path: str,
         'use_ai': use_ai
     }
     
-    if openai_api_key:
-        config['openai_api_key'] = openai_api_key
+    # A chave de API deve ser tratada como um segredo e lida diretamente pelo componente
+    # ou de variáveis de ambiente, não deve ser passada em dicionários de configuração.
+    # O componente CoverDesigner/MaterialsGenerator deve ler de os.getenv("OPENAI_API_KEY")
+    # ou de um objeto de configuração seguro.
+    pass
     
     pipeline = ProductionPipeline(config)
     return pipeline.process_book(manuscript_path, metadata)

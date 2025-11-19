@@ -93,9 +93,9 @@ class ManuscriptPublisher:
             print_info("FASE 2/7: Identificação de Oportunidades")
             tracker.start_phase("OPPORTUNITIES")
             
-            opportunities = self._identify_opportunities(analysis_result)
+            opportunities = self.analyzer.identify_opportunities(analysis_result)
             opportunities_path = output_dir / "02_Oportunidades_Aprimoramento.md"
-            self._save_opportunities(opportunities, str(opportunities_path))
+            self.analyzer.save_opportunities_report(opportunities, opportunities_path)
             
             tracker.end_phase("OPPORTUNITIES", {
                 "total_opportunities": len(opportunities["high_priority"]) + 
@@ -209,79 +209,7 @@ class ManuscriptPublisher:
             print_error(f"Erro: {e}")
             return {"error": str(e)}
     
-    def _identify_opportunities(self, analysis_result: Dict) -> Dict:
-        """Identifica oportunidades de aprimoramento."""
-        opportunities = {
-            "high_priority": [],
-            "medium_priority": [],
-            "low_priority": []
-        }
-        
-        quality = analysis_result["quality"]
-        
-        # Verifica qualidade geral
-        if quality["overall_score"] < 0.7:
-            opportunities["high_priority"].append({
-                "category": "quality",
-                "description": "Qualidade geral abaixo do ideal",
-                "action": "Revisão abrangente necessária"
-            })
-        
-        # Verifica legibilidade
-        if quality["readability_score"] < 0.6:
-            opportunities["medium_priority"].append({
-                "category": "readability",
-                "description": "Legibilidade pode ser melhorada",
-                "action": "Simplificar sentenças e parágrafos"
-            })
-        
-        # Verifica consistência
-        if quality["consistency_score"] < 0.7:
-            opportunities["medium_priority"].append({
-                "category": "consistency",
-                "description": "Inconsistências terminológicas",
-                "action": "Padronizar termos e formatação"
-            })
-        
-        return opportunities
-    
-    def _save_opportunities(self, opportunities: Dict, output_path: str):
-        """Salva relatório de oportunidades."""
-        lines = [
-            "# OPORTUNIDADES DE APRIMORAMENTO",
-            "",
-            "---",
-            "",
-            "## PRIORIDADE ALTA",
-            ""
-        ]
-        
-        for opp in opportunities["high_priority"]:
-            lines.append(f"### {opp['category'].upper()}")
-            lines.append(f"**Descrição:** {opp['description']}")
-            lines.append(f"**Ação:** {opp['action']}")
-            lines.append("")
-        
-        if not opportunities["high_priority"]:
-            lines.append("*Nenhuma oportunidade de alta prioridade identificada.*")
-            lines.append("")
-        
-        lines.extend(["---", "", "## PRIORIDADE MÉDIA", ""])
-        
-        for opp in opportunities["medium_priority"]:
-            lines.append(f"### {opp['category'].upper()}")
-            lines.append(f"**Descrição:** {opp['description']}")
-            lines.append(f"**Ação:** {opp['action']}")
-            lines.append("")
-        
-        if not opportunities["medium_priority"]:
-            lines.append("*Nenhuma oportunidade de média prioridade identificada.*")
-            lines.append("")
-        
-        lines.extend(["---", ""])
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(lines))
+
     
     def _print_summary(self, tracker: ProgressTracker, export_result: Dict, output_dir: Path):
         """Imprime resumo do processamento."""
@@ -363,7 +291,7 @@ Exemplos de uso:
     # Modo linha de comando
     if not args.input:
         parser.print_help()
-        sys.exit(1)
+        return 1
     
     # Carrega configuração
     if args.config:
@@ -377,9 +305,9 @@ Exemplos de uso:
     
     # Retorna código de saída apropriado
     if "error" in results:
-        sys.exit(1)
+        return 1
     else:
-        sys.exit(0)
+        return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

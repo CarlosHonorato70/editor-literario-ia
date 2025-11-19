@@ -56,7 +56,7 @@ class InteractiveMode:
         # Solicita arquivo de entrada
         input_file = input(f"{Colors.OKCYAN}Caminho do manuscrito: {Colors.ENDC}").strip()
         
-        if not os.path.exists(input_file):
+        if not Path(input_file).exists():
             print_error(f"Arquivo não encontrado: {input_file}")
             return
         
