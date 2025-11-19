@@ -457,5 +457,45 @@ def main():
     print("\n" + specs)
 
 
+# Standalone function for easy import
+def generate_print_ready(content, metadata=None, page_format='15x23', bleeds=True):
+    """
+    Gera documento pronto para impressão (standalone wrapper)
+    
+    Args:
+        content: Texto do manuscrito
+        metadata: Dicionário com metadados do livro
+        page_format: Formato da página (ex: '15x23')
+        bleeds: Se deve incluir sangrias para impressão
+        
+    Returns:
+        dict com o documento formatado e especificações técnicas
+    """
+    generator = PrintReadyGenerator()
+    
+    if not metadata:
+        metadata = {
+            'title': 'Manuscrito',
+            'author': 'Autor',
+            'publisher': 'Editora',
+            'isbn': '',
+        }
+    
+    # Gerar documento print-ready
+    formatted_doc = generator.format_for_print(content, page_format, bleeds)
+    
+    # Gerar especificações técnicas
+    page_count = len(content.split('\n\n')) // 20 if content else 100  # Estimativa simples
+    tech_specs = generator.generate_technical_specs(metadata, page_format, page_count)
+    
+    return {
+        'document': formatted_doc,
+        'specs': tech_specs,
+        'page_format': page_format,
+        'page_count': page_count,
+        'ready_for_print': True
+    }
+
+
 if __name__ == '__main__':
     main()
