@@ -99,7 +99,22 @@ class CoverDesigner:
         print(f"🎨 Criando design de capa para '{metadata.get('title', 'Livro')}'...")
         
         # 1. Obter dimensões (formato padrão 6x9 polegadas, 300 DPI)
-        width, height = 1800, 2700  # pixels
+        # Largura da capa (6in) + Largura da lombada (estimada) + Largura da contracapa (6in)
+        # Altura (9in)
+        # 6in * 300dpi = 1800px
+        # 9in * 300dpi = 2700px
+        
+        # Largura da lombada (estimativa baseada em 300 páginas, 0.75in)
+        # A estimativa real deve vir do LayoutEngine, mas para o conceito, usamos um valor fixo.
+        spine_width_px = 225 # 0.75in * 300dpi
+        
+        cover_width = 1800
+        cover_height = 2700
+        
+        width = cover_width * 2 + spine_width_px # Capa + Lombada + Contracapa
+        height = cover_height # Altura da capa
+        
+        # 2. Selecionar paleta de cores
         
         # 2. Selecionar paleta de cores
         genre = metadata.get('genre', 'academic')
@@ -121,16 +136,21 @@ class CoverDesigner:
                 draw = ImageDraw.Draw(cover)
         
         # 5. Aplicar layout específico
-        if layout == 'centered':
-            self._layout_centered(draw, metadata, palette, (width, height))
-        elif layout == 'top_heavy':
-            self._layout_top_heavy(draw, metadata, palette, (width, height))
-        elif layout == 'minimal':
-            self._layout_minimal(draw, metadata, palette, (width, height))
-        elif layout == 'bold':
-            self._layout_bold(draw, metadata, palette, (width, height))
-        else:  # classic
-            self._layout_classic(draw, metadata, palette, (width, height))
+        # O layout agora é aplicado à capa e contracapa separadamente, e a lombada.
+        
+        # Posições
+        back_cover_x = 0
+        spine_x = cover_width
+        front_cover_x = cover_width + spine_width_px
+        
+        # Capa (Front Cover)
+        self._layout_front_cover(draw, metadata, palette, (cover_width, cover_height), front_cover_x)
+        
+        # Contracapa (Back Cover)
+        self._layout_back_cover(draw, metadata, palette, (cover_width, cover_height), back_cover_x)
+        
+        # Lombada (Spine)
+        self._layout_spine(draw, metadata, palette, (spine_width_px, cover_height), spine_x)
         
         # 6. Salvar
         cover.save(output_path, 'PNG', dpi=(300, 300), quality=95)
@@ -185,46 +205,112 @@ class CoverDesigner:
         genre = metadata.get('genre', 'academic')
         description = metadata.get('description', '')
         
-        prompt = f"""Abstract professional book cover background for "{title}", {genre} genre.
+        # O tamanho da imagem deve ser a capa completa (capa + lombada + contracapa)
+        # O modelo DALL-E 3 suporta até 1792x1024 ou 1024x1792.
+        # Usaremos 1792x1024 como base e faremos o upscale/crop.
+        
+        prompt = f"""Abstract professional book cover background for the full wrap-around cover (front, spine, and back) of the book titled "{title}", {genre} genre.
 Style: elegant, modern, minimalist. Colors: deep blues and grays.
-No text, no people, just abstract shapes and patterns."""
+No text, no people, just abstract shapes and patterns. The image must be a single horizontal composition."""
         
         try:
             print("  🤖 Gerando imagem de fundo com IA...")
+            # Usar o maior tamanho horizontal suportado
             response = self.openai.Image.create(
                 prompt=prompt,
                 n=1,
-                size=f"{size[0]}x{size[1]}" if size[0] <= 1024 else "1024x1024"
+                size="1792x1024" # Tamanho máximo horizontal para DALL-E 3
             )
             
             image_url = response['data'][0]['url']
             response = requests.get(image_url)
             img = Image.open(BytesIO(response.content))
             
-            # Redimensionar se necessário
-            if img.size != size:
-                img = img.resize(size, Image.Resampling.LANCZOS)
+            # Redimensionar para o tamanho da capa completa (size)
+            # O tamanho gerado é 1792x1024. O tamanho alvo é (cover_width*2 + spine_width_px) x cover_height
+            # Vamos redimensionar para a altura correta e cortar/esticar a largura.
+            
+            # Calcular a proporção de redimensionamento pela altura
+            target_height = size[1]
+            current_height = img.size[1]
+            
+            scale_factor = target_height / current_height
+            
+            # Novo tamanho mantendo a proporção da altura
+            new_width = int(img.size[0] * scale_factor)
+            new_height = target_height
+            
+            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # Se a largura ainda for menor que a largura alvo, esticar ou preencher (por simplicidade, esticar)
+            if new_width < size[0]:
+                 img = img.resize(size, Image.Resampling.LANCZOS)
+            
+            # Se a largura for maior, cortar o centro (não ideal, mas necessário)
+            elif new_width > size[0]:
+                left = (new_width - size[0]) // 2
+                right = left + size[0]
+                img = img.crop((left, 0, right, size[1]))
             
             return img
         except Exception as e:
             print(f"  ⚠️  Erro ao gerar imagem com IA: {e}")
             return None
     
-    def _layout_centered(self, draw: ImageDraw.Draw, metadata: Dict, 
-                        palette: Dict, size: Tuple[int, int]):
-        """Layout com título centralizado."""
+    def _wrap_text(self, text: str, font: ImageFont.FreeTypeFont, max_width: int) -> List[str]:
+        """Quebra o texto em linhas para caber na largura máxima."""
+        lines = []
+        words = text.split()
+        current_line = []
+        
+        # Obter o objeto ImageDraw.Draw para calcular o tamanho do texto
+        # Como não temos o objeto draw aqui, vamos usar uma estimativa ou
+        # passar o draw como argumento. Por simplicidade, vamos usar uma
+        # função auxiliar que simula o cálculo.
+        
+        # Nota: O código original tinha uma dependência de 'draw' que não estava
+        # definida no escopo de _wrap_text. Corrigindo para usar a função
+        # de cálculo de tamanho de texto da PIL de forma independente.
+        
+        # Usando uma função auxiliar para simular o cálculo de largura do texto
+        def get_text_width(text_to_check, font_to_check):
+            # Cria uma imagem temporária para o cálculo
+            temp_img = Image.new('RGB', (1, 1))
+            temp_draw = ImageDraw.Draw(temp_img)
+            bbox = temp_draw.textbbox((0, 0), text_to_check, font=font_to_check)
+            return bbox[2] - bbox[0]
+        
+        for word in words:
+            test_line = ' '.join(current_line + [word])
+            text_width = get_text_width(test_line, font)
+            
+            if text_width < max_width:
+                current_line.append(word)
+            else:
+                if current_line:
+                    lines.append(' '.join(current_line))
+                current_line = [word]
+        
+        if current_line:
+            lines.append(' '.join(current_line))
+            
+        return lines
+    
+    def _layout_front_cover(self, draw: ImageDraw.Draw, metadata: Dict, 
+                            palette: Dict, size: Tuple[int, int], offset_x: int):
+        """Layout da Capa (Front Cover)."""
         width, height = size
         
         # Título
         title = metadata.get('title', 'Título')
         title_font = self._get_font(100, bold=True)
         
-        # Calcular posição centralizada
+        # Calcular posição centralizada na capa
         bbox = draw.textbbox((0, 0), title, font=title_font)
         text_width = bbox[2] - bbox[0]
         text_height = bbox[3] - bbox[1]
         
-        x = (width - text_width) // 2
+        x = offset_x + (width - text_width) // 2
         y = (height - text_height) // 2 - 200
         
         # Desenhar título com sombra
@@ -239,7 +325,7 @@ No text, no people, just abstract shapes and patterns."""
             subtitle_font = self._get_font(50)
             bbox = draw.textbbox((0, 0), subtitle, font=subtitle_font)
             text_width = bbox[2] - bbox[0]
-            x = (width - text_width) // 2
+            x = offset_x + (width - text_width) // 2
             y += 150
             draw.text((x, y), subtitle, font=subtitle_font, fill=palette['accent'])
         
@@ -248,130 +334,92 @@ No text, no people, just abstract shapes and patterns."""
         author_font = self._get_font(60)
         bbox = draw.textbbox((0, 0), author, font=author_font)
         text_width = bbox[2] - bbox[0]
-        x = (width - text_width) // 2
+        x = offset_x + (width - text_width) // 2
         y = height - 300
         draw.text((x, y), author, font=author_font, fill=palette['text'])
     
-    def _layout_top_heavy(self, draw: ImageDraw.Draw, metadata: Dict,
-                         palette: Dict, size: Tuple[int, int]):
-        """Layout com título no topo."""
+    def _layout_back_cover(self, draw: ImageDraw.Draw, metadata: Dict, 
+                           palette: Dict, size: Tuple[int, int], offset_x: int):
+        """Layout da Contracapa (Back Cover)."""
         width, height = size
         
-        # Título no topo
-        title = metadata.get('title', 'Título')
-        title_font = self._get_font(90, bold=True)
+        # Blurb/Sinopse
+        blurb = metadata.get('blurb', 'Sinopse do livro. Este texto deve ser gerado pelo MaterialsGenerator.')
+        blurb_font = self._get_font(40)
         
-        x = 100
-        y = 200
+        x = offset_x + 100
+        y = 300
+        max_width = width - 200
         
-        # Quebrar título em múltiplas linhas se necessário
-        words = title.split()
-        lines = []
-        current_line = []
+        # Quebrar texto
+        lines = self._wrap_text(blurb, blurb_font, max_width)
         
-        for word in words:
-            test_line = ' '.join(current_line + [word])
-            bbox = draw.textbbox((0, 0), test_line, font=title_font)
-            if bbox[2] - bbox[0] < width - 200:
-                current_line.append(word)
-            else:
-                if current_line:
-                    lines.append(' '.join(current_line))
-                current_line = [word]
-        
-        if current_line:
-            lines.append(' '.join(current_line))
-        
-        # Desenhar cada linha
         for line in lines:
-            draw.text((x, y), line, font=title_font, fill=palette['text'])
-            y += 120
+            draw.text((x, y), line, font=blurb_font, fill=palette['text'])
+            y += 60
+            
+        # ISBN/Código de Barras (simulado)
+        isbn = metadata.get('isbn', '978-1234567890')
+        isbn_font = self._get_font(30)
         
-        # Autor no rodapé
-        author = metadata.get('author', 'Autor')
-        author_font = self._get_font(60)
-        y = height - 250
-        draw.text((x, y), author, font=author_font, fill=palette['accent'])
-    
-    def _layout_minimal(self, draw: ImageDraw.Draw, metadata: Dict,
-                       palette: Dict, size: Tuple[int, int]):
-        """Layout minimalista."""
+        x_isbn = offset_x + (width - 400) // 2
+        y_isbn = height - 200
+        
+        draw.rectangle([x_isbn, y_isbn - 50, x_isbn + 400, y_isbn], fill='#ffffff', outline='#000000')
+        draw.text((x_isbn + 10, y_isbn - 45), f"ISBN {isbn}", font=isbn_font, fill='#000000')
+        
+    def _layout_spine(self, draw: ImageDraw.Draw, metadata: Dict, 
+                      palette: Dict, size: Tuple[int, int], offset_x: int):
+        """Layout da Lombada (Spine)."""
         width, height = size
         
-        # Muito espaço em branco, tipografia pequena
+        # Título (rotacionado)
         title = metadata.get('title', 'Título')
-        title_font = self._get_font(70, bold=True)
+        title_font = self._get_font(60, bold=True)
         
-        x = 150
-        y = height // 2 - 100
+        # Criar imagem temporária para texto rotacionado
+        temp_img = Image.new('RGB', (height, width), palette['primary'])
+        temp_draw = ImageDraw.Draw(temp_img)
         
-        draw.text((x, y), title, font=title_font, fill=palette['text'])
+        # Posição centralizada na lombada
+        # Usando textlength para compatibilidade
+        text_w        # Posição centralizada na lombada
+        # Usar textbbox para obter dimensões corretas
+        bbox = temp_draw.textbbox((0, 0), title, font=title_font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
         
-        # Linha decorativa
-        line_y = y + 100
-        draw.line([(x, line_y), (x + 400, line_y)], 
-                 fill=palette['accent'], width=3)
+        x = (height - text_width) // 2
+        y = (width - text_height) // 2
         
-        # Autor
+        temp_draw.text((x, y), title, font=title_font, fill=palette['text'])
+        
+        # Rotacionar e colar na lombada
+        rotated_text = temp_img.rotate(90, expand=1)
+        
+        # Colar na posição correta
+        draw.bitmap((offset_x, 0), rotated_text, fill=palette['text'])
+        
+        # Autor (rotacionado)
         author = metadata.get('author', 'Autor')
         author_font = self._get_font(40)
-        y = line_y + 50
-        draw.text((x, y), author, font=author_font, fill=palette['text'])
-    
-    def _layout_bold(self, draw: ImageDraw.Draw, metadata: Dict,
-                    palette: Dict, size: Tuple[int, int]):
-        """Layout com tipografia ousada."""
-        width, height = size
         
-        # Título muito grande
-        title = metadata.get('title', 'Título')
-        title_font = self._get_font(120, bold=True)
+        temp_img_author = Image.new('RGB', (height, width), palette['primary'])
+        temp_draw_author = ImageDraw.Draw(temp_img_author)
         
-        x = 100
-        y = 400
+        bbox_a = temp_draw_author.textbbox((0, 0), author, font=author_font)
+        text_width_a = bbox_a[2] - bbox_a[0]
+        text_height_a = bbox_a[3] - bbox_a[1]
         
-        # Título em múltiplas linhas
-        words = title.split()
-        for word in words:
-            draw.text((x, y), word, font=title_font, fill=palette['text'])
-            y += 150
+        x_a = (height - text_width_a) // 2
+        y_a = (width - text_height_a) // 2
         
-        # Autor
-        author = metadata.get('author', 'Autor')
-        author_font = self._get_font(50)
-        y = height - 300
-        draw.text((x, y), author, font=author_font, fill=palette['accent'])
-    
-    def _layout_classic(self, draw: ImageDraw.Draw, metadata: Dict,
-                       palette: Dict, size: Tuple[int, int]):
-        """Layout clássico e elegante."""
-        width, height = size
+        temp_draw_author.text((x_a, y_a), author, font=author_font, fill=palette['accent'])
         
-        # Moldura decorativa
-        margin = 100
-        draw.rectangle([margin, margin, width-margin, height-margin],
-                      outline=palette['accent'], width=5)
+        rotated_author = temp_img_author.rotate(90, expand=1)
         
-        # Título centralizado
-        title = metadata.get('title', 'Título')
-        title_font = self._get_font(80, bold=True)
-        
-        bbox = draw.textbbox((0, 0), title, font=title_font)
-        text_width = bbox[2] - bbox[0]
-        x = (width - text_width) // 2
-        y = height // 2 - 100
-        
-        draw.text((x, y), title, font=title_font, fill=palette['text'])
-        
-        # Autor
-        author = metadata.get('author', 'Autor')
-        author_font = self._get_font(50)
-        bbox = draw.textbbox((0, 0), author, font=author_font)
-        text_width = bbox[2] - bbox[0]
-        x = (width - text_width) // 2
-        y = height - 400
-        draw.text((x, y), author, font=author_font, fill=palette['text'])
-    
+        # Colar na posição correta (abaixo do título)
+        draw.bitmap((offset_x, height - 200), rotated_author, fill=palette['accent'])  
     def _get_font(self, size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
         """Obtém fonte com tamanho especificado."""
         
