@@ -12,6 +12,7 @@ from .utils import (
     print_success,
     print_info,
 )
+from .file_handler import FileHandler, extract_text
 
 __all__ = [
     'Config',
@@ -24,4 +25,6 @@ __all__ = [
     'print_warning',
     'print_success',
     'print_info',
+    'FileHandler',
+    'extract_text',
 ]
